@@ -1,0 +1,2 @@
+psynet==12.0.3
+repp@git+https://repp:tvKi4cirMxgnuf9s4Vma@gitlab.com/computational-audition/repp@master#egg=repp
