@@ -46,10 +46,11 @@ RECRUITER = "prolific" # prolific vs hotair
 INITIAL_RECRUITMENT_SIZE = 10
 AUTO_RECRUIT = False 
 NUM_PARTICIPANTS = 20
-NUM_TRIALS_PER_PARTICIPANT = 2
+NUM_TRIALS_PER_PARTICIPANT_ISO = 2
+NUM_TRIALS_PER_PARTICIPANT_EXPLORE = 4
 
 # time estimates
-DURATION_ESTIMATED_TRIAL = 40
+DURATION_ESTIMATED_TRIAL = 10
 
 # failing criteria
 MIN_RAW_TAPS = 5 # TO BE DECIDED
@@ -74,19 +75,12 @@ def get_prolific_settings():
 ########################################################################################################################
 # TODOS
 ########################################################################################################################
-# TODO: Output: make sure I get the right output, including tapping onsets raw and aligned ones
-# TODO: Double check failing criteria
-# TODO: add good instructions
-# TODO: add practice
+# TODO: Inplement ISO tapping with failing criteria
+# TODO: Inplement rhythm tapping with failing criteria
+# TODO: Implement failing criteria for main task (explore tapping)
+# TODO: Implement feedback page
 # TODO: add pre-screens.
-# TODO: add harin's music.
-
-
-########################################################################################################################
-# TAPPING ANALYSIS
-########################################################################################################################
-# Note: Enhanced analysis functions are now imported from enhanced_tapping_analysis module
-# This eliminates code duplication and improves maintainability
+# TODO: add final instructions
 
 
 ########################################################################################################################
@@ -98,7 +92,6 @@ tempo_600_ms = [600] * 12 # ISO 600ms
 
 iso_stimulus_onsets = [tempo_800_ms, tempo_600_ms]
 iso_stimulus_names = ["iso_800ms", "iso_600ms"]
-
 
 @cache
 def create_iso_stim_with_repp(stim_name, stim_ioi):
@@ -116,7 +109,6 @@ def generate_iso_stimulus_info(path, stim_name, list_iois):
     stim_prepared, info = create_iso_stim_with_repp(stim_name, tuple(list_iois))
     save_json_to_file(info, path)
 
-
 nodes_iso = [
     StaticNode(
         definition={
@@ -131,62 +123,21 @@ nodes_iso = [
     for name, iois in zip(iso_stimulus_names, iso_stimulus_onsets)
 ]
 
-nodes_silent = [
-    StaticNode(
-        definition={
-            "stim_name": name,
-            "list_iois": iois,
-        },
-        assets={
-            "stimulus_audio": CachedFunctionAsset(generate_iso_stimulus_audio),
-            "stimulus_info": CachedFunctionAsset(generate_iso_stimulus_info),
-        },
-    )
-    for name, iois in zip(iso_stimulus_names, iso_stimulus_onsets)
-]
 
-
-# Music stimuli for beat-finding task (no onsets required)
-music_stimulus_name = ["track1", "track2"]
-music_stimulus_audio = ["music/0R8IbpKXavM.wav", "music/ehHKH5PbGYc.wav"]
-
+# Stilent stimuli for explore tapping task (no onsets required)
+music_stimulus_name = ["A", "B", "C", "D"] # TODO: Replace with actual targets (seed interval categories)
+music_stimulus_audio = ["music/silence_10sec.wav", "music/silence_10sec.wav", "music/silence_10sec.wav", "music/silence_10sec.wav"]
 
 def load_audio_only_from_file(fs, audio_filename):
     """
     Load audio file without requiring onsets file.
-    
-    Parameters
-    ----------
-    fs : int
-        Target sampling frequency in Hz
-    audio_filename : str
-        Path to audio file
-        
-    Returns
-    -------
-    np.ndarray
-        Loaded and resampled audio data
     """
     stimulus = REPPStimulus("temp", config=sms_tapping)
     return stimulus.load_resample_file(fs, audio_filename)
 
-
 def filter_and_add_markers_no_onsets(stim, config):
     """
     Apply filtering and add markers without requiring onset information.
-    
-    Parameters
-    ----------
-    stim : np.ndarray
-        Raw audio stimulus data
-    config : Config
-        Configuration parameters
-        
-    Returns
-    -------
-    tuple[np.ndarray, dict]
-        - Prepared stimulus array
-        - Dictionary containing stimulus information
     """
     stimulus = REPPStimulus("temp", config=config)
     
@@ -234,11 +185,10 @@ def filter_and_add_markers_no_onsets(stim, config):
     
     return stim_prepared, stim_info
 
-
 @cache
 def create_music_stim_with_repp_beat_finding(stim_name, audio_filename, fs=44100):
     """
-    Create music stimulus for beat-finding task without requiring onsets file.
+    Create music stimulus without requiring onsets file.
     """
     # Load audio file
     stim = load_audio_only_from_file(fs, audio_filename)
@@ -254,7 +204,6 @@ def create_music_stim_with_repp_beat_finding(stim_name, audio_filename, fs=44100
     info = json.dumps(stim_info, cls=NumpySerializer)
     return stim_prepared, info
 
-
 def generate_music_stimulus_audio(path, stim_name, audio_filename):
     stim_prepared, _ = create_music_stim_with_repp_beat_finding(stim_name, audio_filename)
     save_samples_to_file(stim_prepared, path, sms_tapping.FS)
@@ -263,8 +212,7 @@ def generate_music_stimulus_info(path, stim_name, audio_filename):
     stim_prepared, info = create_music_stim_with_repp_beat_finding(stim_name, audio_filename)
     save_json_to_file(info, path)
 
-
-nodes_music = [
+nodes_silent = [
     StaticNode(
         definition={
             "stim_name": name,
@@ -282,6 +230,7 @@ nodes_music = [
 ########################################################################################################################
 # Experiment parts
 ########################################################################################################################
+# class for iso tapping trials
 class TapTrialAnalysis(AudioRecordTrial, StaticTrial):
     def get_info(self):
         with tempfile.NamedTemporaryFile() as f:
@@ -300,7 +249,7 @@ class TapTrialAnalysis(AudioRecordTrial, StaticTrial):
         # Pass the stimulus info to the analysis function
         _, extracted_onsets, stats = enhanced_tapping_analysis(
             audio_file, title_in_graph, output_plot, stim_info=info)
-        
+                        
         # Extract the quality results from stats
         is_failed = stats.get("failed", True)
         reason = stats.get("reason", "Analysis failed")
@@ -328,7 +277,7 @@ class TapTrial(TapTrialAnalysis):
                 Markup(
                     f"""
                     <br><h3>Tap in time to the musical beat.</h3>
-                    Trial number {trial_number} out of {NUM_TRIALS_PER_PARTICIPANT}  trials.
+                    Trial number {trial_number} out of {NUM_TRIALS_PER_PARTICIPANT_ISO}  trials.
                     """
                 ),
             ),
@@ -374,7 +323,7 @@ class TapTrial(TapTrialAnalysis):
 
 
 class TapTrialISO(TapTrial):
-    time_estimate = DURATION_ESTIMATED_TRIAL
+    time_estimate = 20
 
     def get_bot_response_media(self):
         return {
@@ -383,7 +332,48 @@ class TapTrialISO(TapTrial):
         }[self.definition["stim_name"]]
 
 
-class TapTrialExplore(TapTrialAnalysis):
+# class for explore tapping trials
+class TapTrialAnalysisExplore(AudioRecordTrial, StaticTrial):
+    def get_info(self):
+        with tempfile.NamedTemporaryFile() as f:
+            self.assets["stimulus_info"].export(f.name)
+            with open(f.name, "r") as reader:
+                return json.loads(
+                    json.load(reader)
+                )  # For some reason REPP double-JSON-encodes its output
+
+    def analyze_recording(self, audio_file: str, output_plot: str):
+        info = self.get_info()
+        stim_name = info["stim_name"]
+        title_in_graph = "Participant {}".format(self.participant_id)
+        
+        # Use enhanced analysis instead of basic analysis
+        # Pass the stimulus info to the analysis function
+        _, extracted_onsets, stats = enhanced_tapping_analysis(
+            audio_file, title_in_graph, output_plot, stim_info=info)
+                
+        # TODO: take tapping_ioi from extracted_onsets
+        # for example "tapping_ioi": [550.227272727273, 619.772727272727, 558.409090909091, 605.454545454545, 558.4090909090919, 566.5909090909081, 560.454545454546, 603.4090909090901, 578.863636363636, 587.0454545454559, 591.136363636364, 576.8181818181802, 595.2272727272739, 576.818181818182, 587.045454545454]
+        
+        # TODO: use tapping_ioi as input toscoring function and output score
+
+        # Extract the quality results from stats
+        is_failed = stats.get("failed", True)
+        reason = stats.get("reason", "Analysis failed")
+
+        extracted_onsets_json = json.dumps(extracted_onsets, cls=NumpySerializer)
+        stats = json.dumps(stats, cls=NumpySerializer)
+        
+        return {
+            "failed": is_failed,
+            "reason": reason,
+            "extracted_onsets": extracted_onsets_json,
+            "stats": stats,
+            # "score": score,
+            "stim_name": stim_name,
+        }
+
+class TapTrialExplore(TapTrialAnalysisExplore):
     time_estimate = DURATION_ESTIMATED_TRIAL
     
     def show_trial(self, experiment, participant):
@@ -393,11 +383,11 @@ class TapTrialExplore(TapTrialAnalysis):
         return ModularPage(
             "trial_main_page",
             AudioPrompt(
-                "", # TODO: add silent audio file
+                self.assets["stimulus_audio"].url,
                 Markup(
                     f"""
                     <br><h3>Explore the hidden rhythm by tapping.</h3>
-                    Trial number {trial_number} out of {NUM_TRIALS_PER_PARTICIPANT}  trials.
+                    Trial number {trial_number} out of {NUM_TRIALS_PER_PARTICIPANT_EXPLORE}  trials.
                     """
                 ),
             ),
@@ -437,22 +427,13 @@ class TapTrialExplore(TapTrialAnalysis):
                 ],
             ),
         )
-
+    
     def get_bot_response_media(self): # TODO: add silent example for bot response
-        return {
-            "iso_800ms": "boot_responses/example_iso_slow_tap.wav",
-            "iso_600ms": "boot_responses/example_iso_fast_tap.wav",
-        }[self.definition["stim_name"]]
-
-
-
-class TapTrialMusic(TapTrial):
-    time_estimate = DURATION_ESTIMATED_TRIAL
-
-    def get_bot_response_media(self):
-        return {
-            "track1": "boot_responses/example_music_tapping_track_1.wav",
-            "track2": "boot_responses/example_music_tapping_track_7.wav",
+                return {
+            "A": "boot_responses/example_silence_10sec.wav",
+            "B": "boot_responses/example_silence_10sec.wav",
+            "C": "boot_responses/example_silence_10sec.wav",
+            "D": "boot_responses/example_silence_10sec.wav",
         }[self.definition["stim_name"]]
 
 
@@ -532,32 +513,6 @@ silent_tapping = join(
 )
 
 
-music_tapping = join(
-    InfoPage(
-        Markup(
-            """
-        <h3>Tapping to Music</h3>
-        <hr>
-        You will now listen to music.
-        <br><br>
-        <b><b>Your goal is to tap in time with the beat of the music until the music ends.</b></b>
-        <hr>
-        """
-        ),
-        time_estimate=5,
-    ),
-    StaticTrialMaker(
-        id_="music_tapping",
-        trial_class=TapTrialMusic,
-        nodes=nodes_music,
-        expected_trials_per_participant=len(nodes_music),
-        target_n_participants=NUM_PARTICIPANTS,
-        recruit_mode="n_participants",
-        check_performance_at_end=False,
-    ),
-)
-
-
 ########################################################################################################################
 # Timeline
 ########################################################################################################################
@@ -583,7 +538,6 @@ class Exp(psynet.experiment.Experiment):
             # REPPVolumeCalibrationMusic(),
             ISO_tapping,
             silent_tapping,
-            # music_tapping,
             SuccessfulEndPage(),
         )
     else:
@@ -594,7 +548,6 @@ class Exp(psynet.experiment.Experiment):
             REPPMarkersTest(),  # pre-screening filtering participants based on recording test (markers)
             REPPTappingCalibration(),  # calibrate tapping
             ISO_tapping,
-            music_tapping,
             SuccessfulEndPage(),
         )
 
