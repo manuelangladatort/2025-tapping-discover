@@ -28,6 +28,9 @@ from .repp_beatfinding import (
     enhanced_tapping_analysis,
 )
 
+# Import beat detection analysis functions from separate module
+from .repp_beatfinding.beat_detection import do_beat_detection_analysis
+
 # repp
 from .repp_prescreens import (
     NumpySerializer,
@@ -54,7 +57,22 @@ DURATION_ESTIMATED_TRIAL = 10
 
 # failing criteria
 MIN_RAW_TAPS = 5 # TO BE DECIDED
-MAX_RAW_TAPS = 500 # TO BE DECIDED
+MAX_RAW_TAPS = 100 # TO BE DECIDED
+
+# Config wrapper to include MIN_RAW_TAPS and MAX_RAW_TAPS for beat detection analysis
+class ConfigWithThresholds:
+    """Wrapper around sms_tapping config that adds MIN_RAW_TAPS and MAX_RAW_TAPS attributes."""
+    def __init__(self, base_config):
+        # Copy all attributes from base_config
+        for attr in dir(base_config):
+            if not attr.startswith('_'):
+                try:
+                    setattr(self, attr, getattr(base_config, attr))
+                except AttributeError:
+                    pass  # Skip attributes that can't be read
+        # Add custom thresholds from experiment settings
+        self.MIN_RAW_TAPS = MIN_RAW_TAPS
+        self.MAX_RAW_TAPS = MAX_RAW_TAPS
 
 
 def get_prolific_settings():
@@ -75,9 +93,7 @@ def get_prolific_settings():
 ########################################################################################################################
 # TODOS
 ########################################################################################################################
-# TODO: Inplement ISO tapping with failing criteria
-# TODO: Inplement rhythm tapping with failing criteria
-# TODO: Implement failing criteria for main task (explore tapping)
+# TODO: Inplement normal SMS analysis for ISO tapping + analysis
 # TODO: Implement feedback page
 # TODO: add pre-screens.
 # TODO: add final instructions
@@ -231,7 +247,7 @@ nodes_silent = [
 # Experiment parts
 ########################################################################################################################
 # class for iso tapping trials
-class TapTrialAnalysis(AudioRecordTrial, StaticTrial):
+class TapTrialAnalysisISO(AudioRecordTrial, StaticTrial):
     def get_info(self):
         with tempfile.NamedTemporaryFile() as f:
             self.assets["stimulus_info"].export(f.name)
@@ -246,7 +262,7 @@ class TapTrialAnalysis(AudioRecordTrial, StaticTrial):
         title_in_graph = "Participant {}".format(self.participant_id)
         
         # Use enhanced analysis instead of basic analysis
-        # Pass the stimulus info to the analysis function
+        # TODO: USE NORMAL SMS ANALYSIS HERE!
         _, extracted_onsets, stats = enhanced_tapping_analysis(
             audio_file, title_in_graph, output_plot, stim_info=info)
                         
@@ -265,7 +281,9 @@ class TapTrialAnalysis(AudioRecordTrial, StaticTrial):
             "stim_name": stim_name,
         }
 
-class TapTrial(TapTrialAnalysis):
+class TapTrialISO(TapTrialAnalysisISO):
+    time_estimate = DURATION_ESTIMATED_TRIAL
+    
     def show_trial(self, experiment, participant):
         info = self.get_info()
         duration_rec = info["stim_duration"]
@@ -319,13 +337,6 @@ class TapTrial(TapTrialAnalysis):
         )
 
     def get_bot_response_media(self):
-        raise NotImplementedError
-
-
-class TapTrialISO(TapTrial):
-    time_estimate = 20
-
-    def get_bot_response_media(self):
         return {
             "iso_800ms": "boot_responses/example_iso_slow_tap.wav",
             "iso_600ms": "boot_responses/example_iso_fast_tap.wav",
@@ -347,31 +358,29 @@ class TapTrialAnalysisExplore(AudioRecordTrial, StaticTrial):
         stim_name = info["stim_name"]
         title_in_graph = "Participant {}".format(self.participant_id)
         
-        # Use enhanced analysis instead of basic analysis
-        # Pass the stimulus info to the analysis function
-        _, extracted_onsets, stats = enhanced_tapping_analysis(
-            audio_file, title_in_graph, output_plot, stim_info=info)
-                
-        # TODO: take tapping_ioi from extracted_onsets
-        # for example "tapping_ioi": [550.227272727273, 619.772727272727, 558.409090909091, 605.454545454545, 558.4090909090919, 566.5909090909081, 560.454545454546, 603.4090909090901, 578.863636363636, 587.0454545454559, 591.136363636364, 576.8181818181802, 595.2272727272739, 576.818181818182, 587.045454545454]
+               # Create a config object with MIN_RAW_TAPS and MAX_RAW_TAPS from experiment settings
+        config = ConfigWithThresholds(sms_tapping)
         
-        # TODO: use tapping_ioi as input toscoring function and output score
+        # Use beat detection analysis
+        # Pass the stimulus info and config to the analysis function
+        output, analysis, is_failed = do_beat_detection_analysis(
+            audio_file, title_in_graph, output_plot, stim_info=info, config=config)
+                
+        # Extract the quality results from is_failed
+        is_failed_flag = is_failed.get("failed", True)
+        reason = is_failed.get("reason", "Analysis failed")
 
-        # Extract the quality results from stats
-        is_failed = stats.get("failed", True)
-        reason = stats.get("reason", "Analysis failed")
-
-        extracted_onsets_json = json.dumps(extracted_onsets, cls=NumpySerializer)
-        stats = json.dumps(stats, cls=NumpySerializer)
+        extracted_onsets_json = json.dumps(output, cls=NumpySerializer)
+        analysis_json = json.dumps(analysis, cls=NumpySerializer)
         
         return {
-            "failed": is_failed,
+            "failed": is_failed_flag,
             "reason": reason,
             "extracted_onsets": extracted_onsets_json,
-            "stats": stats,
-            # "score": score,
+            "analysis": analysis_json,
             "stim_name": stim_name,
         }
+
 
 class TapTrialExplore(TapTrialAnalysisExplore):
     time_estimate = DURATION_ESTIMATED_TRIAL
@@ -536,7 +545,7 @@ class Exp(psynet.experiment.Experiment):
             NoConsent(),
             welcome(),
             # REPPVolumeCalibrationMusic(),
-            ISO_tapping,
+            # ISO_tapping, # TODO: Uncomment this when ISO tapping is fixed
             silent_tapping,
             SuccessfulEndPage(),
         )

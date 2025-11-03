@@ -1,4 +1,5 @@
-#!/usr/bin/env python3
+# THIS CODE HAS NOT BEEN TESTED PROPERLY AND SHOULD NOT BE USED
+
 """
 Enhanced tapping analysis module.
 This module provides comprehensive tapping analysis with detailed visualisations.
