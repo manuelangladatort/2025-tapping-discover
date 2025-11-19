@@ -157,10 +157,21 @@ def filter_and_add_markers_no_onsets(stim, config):
     """
     stimulus = REPPStimulus("temp", config=config)
     
-    # Apply spectral filtering
-    filtered_stim = stimulus.filter_stim(
-        config.FS, stim, config.STIM_RANGE, config.STIM_AMPLITUDE
-    )
+    # --- NEW: handle silent input ---------------------------------
+    import numpy as np
+    # If the signal is (almost) silent, skip filter_stim entirely
+    if np.max(np.abs(stim)) < 1e-8:
+        # keep it silent; we only want the markers
+        filtered_stim = np.zeros_like(stim, dtype=float)
+    else:
+        # Apply spectral filtering as usual
+        filtered_stim = stimulus.filter_stim(
+            config.FS, stim, config.STIM_RANGE, config.STIM_AMPLITUDE
+        )
+
+        # Guard against NaNs/Infs just in case
+        filtered_stim = np.nan_to_num(filtered_stim, nan=0.0, posinf=0.0, neginf=0.0)
+    # ----------------------------------------------------------------
     
     # Create marker sounds
     markers_sound = stimulus.make_markers_sound(
@@ -559,10 +570,3 @@ class Exp(psynet.experiment.Experiment):
             ISO_tapping,
             SuccessfulEndPage(),
         )
-
-    # def __init__(self, session=None):
-    #     super().__init__(session)
-    #     self.initial_recruitment_size = 1
-
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)

@@ -1,2 +1,3 @@
-psynet==12.0.3
+psynet@git+https://gitlab.com/PsyNetDev/PsyNet@v12.1.1#egg=psynet
+dallinger==11.3.2
 repp@git+https://repp:tvKi4cirMxgnuf9s4Vma@gitlab.com/computational-audition/repp@master#egg=repp
