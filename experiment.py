@@ -3,6 +3,8 @@ import json
 import tempfile
 from functools import cache
 import numpy as np
+import math
+from numpy.linalg import norm
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from matplotlib.gridspec import GridSpec
@@ -56,6 +58,7 @@ NUM_TRIALS_PER_PARTICIPANT_EXPLORE = 4
 DURATION_ESTIMATED_TRIAL = 10
 
 # failing criteria
+TARGET_NUM_TAPS = 4
 MIN_RAW_TAPS = 5 # TO BE DECIDED
 MAX_RAW_TAPS = 100 # TO BE DECIDED
 
@@ -93,10 +96,35 @@ def get_prolific_settings():
 ########################################################################################################################
 # TODOS
 ########################################################################################################################
-# TODO: Inplement normal SMS analysis for ISO tapping + analysis
-# TODO: Implement feedback page
+# TODO: 2 targets (121, 233) and 10 (or 25) trials per target, 3 seconds
+
+# TODO: Inplement normal SMS analysis with ISO tapping + analysis
 # TODO: add pre-screens.
 # TODO: add final instructions
+
+
+########################################################################################################################
+# Scoring function
+########################################################################################################################
+def scale_to_target(target, vector):
+    scale_factor = min(target) / min(vector)
+    return [v * scale_factor for v in vector]
+
+def scoring_function(target, tapping_iois):
+    perc = 0.3
+    D = 1.5
+    a = 10
+    b = 40
+    
+    iois_final = scale_to_target(target, tapping_iois)
+    sum_of_diff = [(abs(iois_final[i] - target[i])) for i in range(3)]
+    error = norm(sum_of_diff)
+    
+    score = math.exp(-(error) * perc) * 100
+    final_score = a + (score - b) * D
+    
+    return round(final_score)
+
 
 
 ########################################################################################################################
@@ -141,8 +169,8 @@ nodes_iso = [
 
 
 # Stilent stimuli for explore tapping task (no onsets required)
-music_stimulus_name = ["A", "B", "C", "D"] # TODO: Replace with actual targets (seed interval categories)
-music_stimulus_audio = ["music/silence_10sec.wav", "music/silence_10sec.wav", "music/silence_10sec.wav", "music/silence_10sec.wav"]
+music_stimulus_name = ["121", "112"] # TODO: Replace with actual targets (seed interval categories)
+music_stimulus_audio = ["music/silence_3sec.wav", "music/silence_3sec.wav"]
 
 def load_audio_only_from_file(fs, audio_filename):
     """
@@ -383,12 +411,24 @@ class TapTrialAnalysisExplore(AudioRecordTrial, StaticTrial):
 
         extracted_onsets_json = json.dumps(output, cls=NumpySerializer)
         analysis_json = json.dumps(analysis, cls=NumpySerializer)
+
+        # scoring
+        # TARGET_RHYTHM = [1,2,1]
+        TARGET_RHYTHM = [int(char) for char in stim_name]
+        tapping_iois = analysis["tapping_iois"]
+        num_taps_detected = analysis["num_taps_detected"]
+        score = scoring_function(TARGET_RHYTHM, analysis["tapping_iois"])
+        
         
         return {
             "failed": is_failed_flag,
             "reason": reason,
             "extracted_onsets": extracted_onsets_json,
             "analysis": analysis_json,
+            "tapping_iois": tapping_iois,
+            "num_taps_detected": num_taps_detected,
+            "target": TARGET_RHYTHM,
+            "score": score,
             "stim_name": stim_name,
         }
 
@@ -398,6 +438,9 @@ class TapTrialExplore(TapTrialAnalysisExplore):
     
     def show_trial(self, experiment, participant):
         info = self.get_info()
+        stim_name = info["stim_name"]
+        TARGET_RHYTHM = [int(char) for char in stim_name]
+
         duration_rec = info["stim_duration"]
         trial_number = self.position + 1
         return ModularPage(
@@ -406,8 +449,12 @@ class TapTrialExplore(TapTrialAnalysisExplore):
                 self.assets["stimulus_audio"].url,
                 Markup(
                     f"""
-                    <br><h3>Explore the hidden rhythm by tapping.</h3>
-                    Trial number {trial_number} out of {NUM_TRIALS_PER_PARTICIPANT_EXPLORE}  trials.
+                    <br><h3>Find the hidden rhythm</h3>
+                    The rhythm has exactly 4 taps. The gaps can be short or long, this is what creates the rhythm. Try tapping different patterns!
+                    <br>
+                    <br>
+                    <i>Target rhythm = {TARGET_RHYTHM}</i><br>
+                    <i>Trial number {trial_number} out of {NUM_TRIALS_PER_PARTICIPANT_EXPLORE} trials.</i>
                     """
                 ),
             ),
@@ -450,11 +497,69 @@ class TapTrialExplore(TapTrialAnalysisExplore):
     
     def get_bot_response_media(self): # TODO: add silent example for bot response
                 return {
-            "A": "boot_responses/example_silence_10sec.wav",
-            "B": "boot_responses/example_silence_10sec.wav",
-            "C": "boot_responses/example_silence_10sec.wav",
-            "D": "boot_responses/example_silence_10sec.wav",
+            "121": "boot_responses/example_silence_10sec.wav",
+            "112": "boot_responses/example_silence_10sec.wav",
         }[self.definition["stim_name"]]
+
+    def gives_feedback(self, experiment, participant):
+        return True
+
+    def show_feedback(self, experiment, participant):
+        output_analysis = self.analysis
+        tapping_iois = output_analysis["tapping_iois"]
+        num_taps_detected = output_analysis["num_taps_detected"]
+        score = output_analysis["score"]
+
+        if num_taps_detected == TARGET_NUM_TAPS:
+            return InfoPage(
+                Markup(
+                    f"""
+                    <h3>Feedback</h3>
+                    <hr>
+                    Your score is {score}.
+                    <hr>
+                    """
+                ),
+                time_estimate=2
+            )
+        elif num_taps_detected == (TARGET_NUM_TAPS - 1) or num_taps_detected == (TARGET_NUM_TAPS + 1):
+            return InfoPage(
+                Markup(
+                    f"""
+                    <h3>We did not detect the correct number of taps</h3>
+                    <hr>
+                    We detected {num_taps_detected} taps in the rhythm, but we asked you to produce a rhythm with {TARGET_NUM_TAPS} taps.
+                    <br>
+                    <br>
+                    Please try to do one or more of the following:
+                    <ol><li>Make sure you are in a quiet environment.</li>
+                        <li>Tap on the surface of your laptop using your index finger.</li>
+                        <li>Do not tap during the beeps at the start and end of the recording.</li>
+                    </ol>
+                    <b><b>If you don't improve your performance, the experiment will terminate.</b></b>
+                    <hr>
+                    """
+                ),
+                time_estimate=2
+            )
+        else:
+            return InfoPage(
+                Markup(
+                    f"""
+                   <h3>Your performance is not good</h3>
+                    <hr>
+                    <b><b>If you don't improve your performance, the experiment will terminate.</b></b>
+                    <br><br>
+                    Please try to do one or more of the following:
+                    <ol><li>Make sure you are in a quiet environment.</li>
+                        <li>Tap on the surface of your laptop using your index finger.</li>
+                        <li>Do not tap during the beeps at the start and end of the recording.</li>
+                    </ol>
+                    <hr>
+                    """
+                ),
+                time_estimate=2
+            )
 
 
 def welcome():
@@ -525,9 +630,12 @@ silent_tapping = join(
         id_="silent_tapping",
         trial_class=TapTrialExplore,
         nodes=nodes_silent,
-        expected_trials_per_participant=len(nodes_silent),
+        expected_trials_per_participant=4,
+        max_trials_per_participant=4,
+        allow_repeated_nodes=True,
         target_n_participants=NUM_PARTICIPANTS,
         recruit_mode="n_participants",
+        # check_performance_every_trial=True,
         check_performance_at_end=False,
     ),
 )

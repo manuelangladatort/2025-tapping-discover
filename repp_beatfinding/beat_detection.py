@@ -838,13 +838,13 @@ def do_plot_beat_detection(title_plot, audio_signals, aligned_onsets, analysis, 
     if len(tap_onsets) > 0 and len(R_clean) > 0:
         mmx = np.max(R_clean) * 0.8
         plt.scatter(tap_onsets / 1000.0, [mmx] * len(tap_onsets), 
-                   color=colours[2], s=100, marker='o', zorder=5, label='Detected taps')
+                   color=colours[2], s=40, marker='+', zorder=5, label='Detected taps')
     
     # Add detected marker indicators (if available)
     if len(markers_detected) > 0 and len(R_clean) > 0:
         mmx_markers = np.max(R_clean) * 0.6
         plt.scatter(markers_detected / 1000.0, [mmx_markers] * len(markers_detected), 
-                   color=colours[4], s=80, marker='s', zorder=5, label='Detected markers')
+                   color=colours[4], s=40, marker='s', zorder=5, label='Detected markers')
     
     plt.title(f'{title_plot}: Beat Detection Analysis', fontsize=16, fontweight='bold')
     plt.xlabel('Time (seconds)')
