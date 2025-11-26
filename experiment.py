@@ -25,10 +25,6 @@ from psynet.timeline import ProgressDisplay, ProgressStage, Timeline, join
 from psynet.trial.audio import AudioRecordTrial
 from psynet.trial.static import StaticNode, StaticTrial, StaticTrialMaker
 
-# Import enhanced analysis functions from separate module
-from .repp_beatfinding import (
-    enhanced_tapping_analysis,
-)
 
 # Import beat detection analysis functions from separate module
 from .repp_beatfinding.beat_detection import do_beat_detection_analysis
@@ -47,7 +43,7 @@ from .repp_prescreens import (
 DEBUG = True
 
 # recruitment
-RECRUITER = "prolific" # prolific vs hotair
+RECRUITER = "generic" # prolific vs hotair vs generic
 INITIAL_RECRUITMENT_SIZE = 10
 AUTO_RECRUIT = False 
 NUM_PARTICIPANTS = 20
@@ -417,7 +413,14 @@ class TapTrialAnalysisExplore(AudioRecordTrial, StaticTrial):
         TARGET_RHYTHM = [int(char) for char in stim_name]
         tapping_iois = analysis["tapping_iois"]
         num_taps_detected = analysis["num_taps_detected"]
-        score = scoring_function(TARGET_RHYTHM, analysis["tapping_iois"])
+
+        # print code to debug
+        # print(f"DEBUG analyze_recording: stim_name={stim_name}, TARGET_RHYTHM={TARGET_RHYTHM}")
+        # print(f"DEBUG analyze_recording: tapping_iois={tapping_iois}, type={type(tapping_iois)}")
+        # print(f"DEBUG analyze_recording: num_taps_detected={num_taps_detected}")
+        # print(f"DEBUG analyze_recording: analysis keys={list(analysis.keys()) if isinstance(analysis, dict) else 'N/A'}")
+
+        score = scoring_function(TARGET_RHYTHM, tapping_iois)
         
         
         return {

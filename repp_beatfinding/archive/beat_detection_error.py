@@ -67,161 +67,105 @@ def do_signal_processing_beat_detection(recording_filename, stim_info, config):
     return markers_onsets, audio_signals, raw_extracted_onsets, aligned_onsets
 
 
-# def align_onsets_beat_detection(      # original with bug
-#     initial_onsets: np.ndarray,
-#     raw_extracted_onsets: Dict[str, np.ndarray],
-#     markers_matching_window: float,
-#     onset_matching_window_phase: list
-# ) -> Dict[str, Union[np.ndarray, float]]:
-#     """Align tapping onsets with detected markers for beat detection tasks.
+def align_onsets_beat_detection(
+    initial_onsets: np.ndarray,
+    raw_extracted_onsets: Dict[str, np.ndarray],
+    markers_matching_window: float,
+    onset_matching_window_phase: list
+) -> Dict[str, Union[np.ndarray, float]]:
+    """Align tapping onsets with detected markers for beat detection tasks.
 
-#     Parameters
-#     ----------
-#     initial_onsets : np.ndarray
-#         Array of marker onsets from stimulus info
-#     raw_extracted_onsets : dict
-#         Dictionary containing extracted onsets including 'markers_detected_onsets' and
-#         'tapping_detected_onsets' keys
-#     markers_matching_window : float
-#         Window for matching marker onsets (ms)
-#     onset_matching_window_phase : list
-#         Phase window for matching onsets
+    Parameters
+    ----------
+    initial_onsets : np.ndarray
+        Array of marker onsets from stimulus info
+    raw_extracted_onsets : dict
+        Dictionary containing extracted onsets including 'markers_detected_onsets' and
+        'tapping_detected_onsets' keys
+    markers_matching_window : float
+        Window for matching marker onsets (ms)
+    onset_matching_window_phase : list
+        Phase window for matching onsets
 
-#     Returns
-#     -------
-#     dict
-#         Dictionary containing aligned onsets and timing information with keys:
-#         - 'resp_onsets_detected': Detected tapping onsets
-#         - 'resp_onsets_aligned': Aligned tapping onsets
-#         - 'num_resp_raw_onsets': Number of raw tapping onsets
-#         - 'markers_onsets_detected': Detected marker onsets
-#         - 'markers_onsets_aligned': Aligned marker onsets
-#         - 'markers_onsets_input': Original input marker onsets
-#         - Additional keys from markers_verification
-#     """
-#     markers_detected = raw_extracted_onsets['markers_detected_onsets']
-#     tapping_detected = raw_extracted_onsets['tapping_detected_onsets']
-#     markers_onsets = initial_onsets   # original
+    Returns
+    -------
+    dict
+        Dictionary containing aligned onsets and timing information with keys:
+        - 'resp_onsets_detected': Detected tapping onsets
+        - 'resp_onsets_aligned': Aligned tapping onsets
+        - 'num_resp_raw_onsets': Number of raw tapping onsets
+        - 'markers_onsets_detected': Detected marker onsets
+        - 'markers_onsets_aligned': Aligned marker onsets
+        - 'markers_onsets_input': Original input marker onsets
+        - Additional keys from markers_verification
+    """
+    markers_detected = raw_extracted_onsets['markers_detected_onsets']
+    tapping_detected = raw_extracted_onsets['tapping_detected_onsets']
+    markers_onsets = initial_onsets
     
-#     # Match raw tapping onsets against marker onsets to separate them
-#     # This identifies which tapping onsets are actually markers vs real taps
-#     if len(markers_detected) > 0 and len(tapping_detected) > 0:
-#         matched_onsets = compute_matched_onsets(
-#             markers_detected,   
-#             tapping_detected,
-#             markers_matching_window,
-#             onset_matching_window_phase
-#         )
+    # Match raw tapping onsets against marker onsets to separate them
+    # This identifies which tapping onsets are actually markers vs real taps
+    if len(markers_detected) > 0 and len(tapping_detected) > 0:
+        matched_onsets = compute_matched_onsets(
+            markers_detected,
+            tapping_detected,
+            markers_matching_window,
+            onset_matching_window_phase
+        )
         
-#         # Extract matched marker onsets to identify which markers have matching taps
-#         # These markers indicate which tapping onsets should be filtered out
-#         matched_marker_onsets = matched_onsets['stim_matched']
+        # Extract matched marker onsets to identify which markers have matching taps
+        # These markers indicate which tapping onsets should be filtered out
+        matched_marker_onsets = matched_onsets['stim_matched']
         
-#         # Filter out tapping onsets that matched markers (these are marker onsets, not real taps)
-#         # Keep only tapping onsets that didn't match any marker
-#         # We identify matched taps by finding which original tapping onsets are close to matched markers
-#         tapping_mask = np.ones(len(tapping_detected), dtype=bool)
+        # Filter out tapping onsets that matched markers (these are marker onsets, not real taps)
+        # Keep only tapping onsets that didn't match any marker
+        # We identify matched taps by finding which original tapping onsets are close to matched markers
+        tapping_mask = np.ones(len(tapping_detected), dtype=bool)
         
-#         # For each marker that was matched, find the corresponding tapping onset
-#         matched_marker_indices = np.where(~np.isnan(matched_marker_onsets))[0]
-#         for marker_idx in matched_marker_indices:
-#             marker_time = markers_detected[marker_idx]    #original
-
-#             # Find tapping onsets within the matching window of this marker
-#             distances = np.abs(tapping_detected - marker_time)
-#             within_window = distances < markers_matching_window
-#             if np.any(within_window):
-#                 # Mark the closest tap as matched (to be filtered out)
-#                 closest_idx = np.argmin(distances)
-#                 if distances[closest_idx] < markers_matching_window:
-#                     tapping_mask[closest_idx] = False
+        # For each marker that was matched, find the corresponding tapping onset
+        matched_marker_indices = np.where(~np.isnan(matched_marker_onsets))[0]
+        for marker_idx in matched_marker_indices:
+            marker_time = markers_detected[marker_idx]
+            # Find tapping onsets within the matching window of this marker
+            distances = np.abs(tapping_detected - marker_time)
+            within_window = distances < markers_matching_window
+            if np.any(within_window):
+                # Mark the closest tap as matched (to be filtered out)
+                closest_idx = np.argmin(distances)
+                if distances[closest_idx] < markers_matching_window:
+                    tapping_mask[closest_idx] = False
         
-#         # Keep only tapping onsets that didn't match markers
-#         tapping_detected_filtered = tapping_detected[tapping_mask]
-#     else:
-#         # No markers or no taps, keep all tapping onsets
-#         tapping_detected_filtered = tapping_detected.copy()
-#         matched_onsets = None
+        # Keep only tapping onsets that didn't match markers
+        tapping_detected_filtered = tapping_detected[tapping_mask]
+    else:
+        # No markers or no taps, keep all tapping onsets
+        tapping_detected_filtered = tapping_detected.copy()
+        matched_onsets = None
     
-#     # Align filtered tapping onsets to first marker
-#     tapping_aligned = align_to_first_marker_tapping_only(
-#         markers_onsets,
-#         markers_detected,
-#         tapping_detected_filtered
-#     )
-
-#     # Verify markers
-#     markers_verification = sp.verify_onsets_detection(
-#         markers_detected,
-#         markers_onsets,
-#         markers_matching_window,
-#         onset_matching_window_phase
-#     )
-
-#     return {
-#         'resp_onsets_detected': tapping_detected_filtered,
-#         'resp_onsets_aligned': tapping_aligned,
-#         'num_resp_raw_onsets': float(len(tapping_detected_filtered)),
-#         'markers_onsets_detected': markers_detected,
-#         'markers_onsets_aligned': markers_onsets - markers_onsets[0] + markers_detected[0],
-#         'markers_onsets_input': markers_onsets,
-#         **markers_verification
-#     }
-    
-    
-
-
-def align_onsets_beat_detection(        # supporting functions from Repp v1.3.0
+    # Align filtered tapping onsets to first marker
+    tapping_aligned = align_to_first_marker_tapping_only(
         markers_onsets,
-        raw_extracted_onsets,
-        markers_matching_window,
-        onset_matching_window_phase
-):
-    """
-    Align tapping onsets with markers onsets only (beat detection task)
-    """
-    # get extracted onsets
-    markers_detected_onsets = raw_extracted_onsets['markers_detected_onsets']
-    tapping_detected_onsets = raw_extracted_onsets['tapping_detected_onsets']
-    # use marker onsets to define a window for cleaning tapping onsets near markers
-    min_marker_isi = np.min(np.diff(np.array(markers_onsets)))
-    # tapping
-    tapping_onsets_corrected = tapping_detected_onsets - markers_detected_onsets[0]
-    # ideal  version of markers
-    markers_onsets_aligned = markers_onsets - markers_onsets[0] + markers_detected_onsets[0]
-    # find artifacts and remove
-    markers_in_tapping = np.less(
-        [(min(np.abs(onset - markers_onsets_aligned))) for onset in tapping_detected_onsets],
-        min_marker_isi)  # find markers in the tapping signal: Note changed from
-    # onset_matching_window to something based on marker ISI
-    onsets_before_after_markers = np.logical_or(np.less(tapping_detected_onsets, min(markers_onsets_aligned)),
-                                                np.less(max(markers_onsets_aligned),
-                                                        tapping_detected_onsets))  # find onsets before/ after markers
-    is_tapping_ok = np.logical_and(~markers_in_tapping, ~onsets_before_after_markers)  # are the tapping onsets ok?
-    tapping_onsets_corrected = tapping_onsets_corrected[is_tapping_ok]  # filter markers from tapping
-    tapping_detected_onsets = tapping_detected_onsets[
-        is_tapping_ok]  # filter markers from tapping (using raw version)
+        markers_detected,
+        tapping_detected_filtered
+    )
 
-    # verify markers
-    onsets_detection_info = sp.verify_onsets_detection(
-        markers_detected_onsets,
+    # Verify markers
+    markers_verification = sp.verify_onsets_detection(
+        markers_detected,
         markers_onsets,
         markers_matching_window,
         onset_matching_window_phase
     )
-    aligned_onsets = {
-        'resp_onsets_detected': tapping_detected_onsets,
-        'resp_onsets_aligned': tapping_onsets_corrected,
-        'num_resp_raw_onsets': float(np.size(tapping_detected_onsets)),
-        'markers_onsets_detected': markers_detected_onsets,
-        'markers_onsets_aligned': markers_onsets_aligned,
-        'markers_onsets_input': markers_onsets,
-        **onsets_detection_info  # info about markers detection procedure
-    }
-    return aligned_onsets
 
- 
-    
+    return {
+        'resp_onsets_detected': tapping_detected_filtered,
+        'resp_onsets_aligned': tapping_aligned,
+        'num_resp_raw_onsets': float(len(tapping_detected_filtered)),
+        'markers_onsets_detected': markers_detected,
+        'markers_onsets_aligned': markers_onsets - markers_onsets[0] + markers_detected[0],
+        'markers_onsets_input': markers_onsets,
+        **markers_verification
+    }
 
 
 def compute_matched_onsets(
@@ -643,7 +587,6 @@ def do_beat_detection_analysis(recording_filename, title_plot, output_plot, stim
     print("Analysing results...")
     fig = do_plot_beat_detection(title_plot, audio_signals, aligned_onsets, analysis, is_failed, config)
     save_local(fig, output_plot, dpi)
-    plt.close(fig)
     print("Plot saved")
     del fig
     gc.collect()
@@ -866,7 +809,6 @@ def do_plot_beat_detection(title_plot, audio_signals, aligned_onsets, analysis, 
         markers_detected = np.array([])
         markers_aligned = np.array([])
         tapping_iois = np.array([])
-        
     
     # Check if we have any data to plot
     if len(tt) == 0:
@@ -903,11 +845,11 @@ def do_plot_beat_detection(title_plot, audio_signals, aligned_onsets, analysis, 
         mmx_markers = np.max(R_clean) * 0.6
         plt.scatter(markers_detected / 1000.0, [mmx_markers] * len(markers_detected), 
                    color=colours[4], s=40, marker='s', zorder=5, label='Detected markers')
-    #plt.xlim(162,164)
+    
     plt.title(f'{title_plot}: Beat Detection Analysis', fontsize=16, fontweight='bold')
     plt.xlabel('Time (seconds)')
     plt.ylabel('Amplitude')
-    plt.legend(loc='lower right')
+    plt.legend()
     plt.grid(True, alpha=0.3)
     
     # 2. Marker detection analysis (top row, column 3)
