@@ -17,11 +17,11 @@ from repp.stimulus import REPPStimulus
 from repp.utils import save_json_to_file, save_samples_to_file
 
 import psynet.experiment
-from psynet.asset import CachedFunctionAsset, LocalStorage 
+from psynet.asset import CachedFunctionAsset, ExperimentAsset, LocalStorage
 from psynet.consent import NoConsent
 from psynet.modular_page import AudioPrompt, AudioRecordControl, ModularPage
 from psynet.page import InfoPage, SuccessfulEndPage
-from psynet.timeline import ProgressDisplay, ProgressStage, Timeline, join
+from psynet.timeline import ProgressDisplay, ProgressStage, Timeline, join, randomize
 from psynet.trial.audio import AudioRecordTrial
 from psynet.trial.static import StaticNode, StaticTrial, StaticTrialMaker
 
@@ -38,25 +38,43 @@ from .repp_prescreens import (
 )
 
 ########################################################################################################################
+# TODOS
+########################################################################################################################
+# TODO: reduce beeps in marker from 3 to 1.
+# TODO: Add learning phase so participant understand the task.
+
+
+########################################################################################################################
+# Targets
+########################################################################################################################
+# Three targets: 121, 112, 332
+
+
+########################################################################################################################
 # SETUP
 ########################################################################################################################
 DEBUG = True
 
 # recruitment
-RECRUITER = "generic" # prolific vs hotair vs generic
-INITIAL_RECRUITMENT_SIZE = 10
-AUTO_RECRUIT = False 
-NUM_PARTICIPANTS = 20
-NUM_TRIALS_PER_PARTICIPANT_ISO = 2
-NUM_TRIALS_PER_PARTICIPANT_EXPLORE = 4
+RECRUITER = "prolific" # prolific vs hotair vs generic
+INITIAL_RECRUITMENT_SIZE = 10 # N  people to recruit initially
+NUM_PARTICIPANTS = 20 # N people to run the experiment
+AUTO_RECRUIT = False # Keep recruiting until we have NUM_PARTICIPANTS participants
 
-# time estimates
-DURATION_ESTIMATED_TRIAL = 10
+# N trials
+NUM_TRIALS_PER_PARTICIPANT_ISO = 2 # practice trials
 
-# failing criteria
+# Per trial maker: 1 target × N trials (participant repeats the same trial N times)
+NUM_TRIALS_PER_TARGET = 30  # 30 repetitions of the same trial within each trial maker
+if DEBUG:
+    NUM_TRIALS_PER_TARGET = 3
+    
+DURATION_ESTIMATED_TRIAL = 10 # estimated duration of each trial in seconds
+
+# failing criteria (only allow 4 taps)
 TARGET_NUM_TAPS = 4
-MIN_RAW_TAPS = 5 # TO BE DECIDED
-MAX_RAW_TAPS = 100 # TO BE DECIDED
+MIN_RAW_TAPS = 4
+MAX_RAW_TAPS = 4
 
 # Config wrapper to include MIN_RAW_TAPS and MAX_RAW_TAPS for beat detection analysis
 class ConfigWithThresholds:
@@ -83,20 +101,9 @@ def get_prolific_settings():
         "prolific_estimated_completion_minutes": 14,
         "prolific_recruitment_config": qualification,
         "base_payment": 2.1,
-        "auto_recruit": False,
         "currency": "£",
         "wage_per_hour": 0.01
     }
-
-
-########################################################################################################################
-# TODOS
-########################################################################################################################
-# TODO: 2 targets (121, 233) and 10 (or 25) trials per target, 3 seconds
-
-# TODO: Inplement normal SMS analysis with ISO tapping + analysis
-# TODO: add pre-screens.
-# TODO: add final instructions
 
 
 ########################################################################################################################
@@ -111,7 +118,11 @@ def scoring_function(target, tapping_iois):
     D = 1.5
     a = 10
     b = 40
-    
+
+    # Need at least 3 IOIs to compare against a 3-element target rhythm
+    if len(tapping_iois) < 3 or len(target) < 3:
+        return 0  # Minimum score for insufficient data
+
     iois_final = scale_to_target(target, tapping_iois)
     sum_of_diff = [(abs(iois_final[i] - target[i])) for i in range(3)]
     error = norm(sum_of_diff)
@@ -263,26 +274,74 @@ def generate_music_stimulus_info(path, stim_name, audio_filename):
     stim_prepared, info = create_music_stim_with_repp_beat_finding(stim_name, audio_filename)
     save_json_to_file(info, path)
 
-nodes_silent = [
+# nodes_silent = [
+#     StaticNode(
+#         definition={
+#             "stim_name": name,
+#             "audio_filename": audio,
+#         },
+#         assets={
+#             "stimulus_audio": CachedFunctionAsset(generate_music_stimulus_audio),
+#             "stimulus_info": CachedFunctionAsset(generate_music_stimulus_info),
+#         },
+#     )
+#      for name, audio in zip(music_stimulus_name, music_stimulus_audio)
+# ]
+
+
+nodes_target1 = [
     StaticNode(
         definition={
-            "stim_name": name,
-            "audio_filename": audio,
+            "stim_name": "121",
+            "audio_filename": "music/silence_3sec.wav",
         },
         assets={
             "stimulus_audio": CachedFunctionAsset(generate_music_stimulus_audio),
             "stimulus_info": CachedFunctionAsset(generate_music_stimulus_info),
         },
     )
-     for name, audio in zip(music_stimulus_name, music_stimulus_audio)
 ]
 
+nodes_target2 = [
+    StaticNode(
+        definition={
+            "stim_name": "112",
+            "audio_filename": "music/silence_3sec.wav",
+        },
+        assets={
+            "stimulus_audio": CachedFunctionAsset(generate_music_stimulus_audio),
+            "stimulus_info": CachedFunctionAsset(generate_music_stimulus_info),
+        },
+    )
+]
+
+nodes_target3 = [
+    StaticNode(
+        definition={
+            "stim_name": "332",
+            "audio_filename": "music/silence_3sec.wav",
+        },
+        assets={
+            "stimulus_audio": CachedFunctionAsset(generate_music_stimulus_audio),
+            "stimulus_info": CachedFunctionAsset(generate_music_stimulus_info),
+        },
+    )
+]
 
 ########################################################################################################################
 # Experiment parts
 ########################################################################################################################
 # class for iso tapping trials
 class TapTrialAnalysisISO(AudioRecordTrial, StaticTrial):
+    def format_answer(self, raw_answer, **kwargs):
+        """Add the Recording asset to trial.assets so async_post_trial can find it."""
+        answer = raw_answer
+        if isinstance(answer, dict) and answer.get("supports_record_trial") and "asset_id" in answer:
+            asset = ExperimentAsset.query.filter_by(id=answer["asset_id"]).one()
+            if asset not in self.assets.values():
+                self.add_asset("recording", asset)
+        return answer
+
     def get_info(self):
         with tempfile.NamedTemporaryFile() as f:
             self.assets["stimulus_info"].export(f.name)
@@ -295,29 +354,24 @@ class TapTrialAnalysisISO(AudioRecordTrial, StaticTrial):
         info = self.get_info()
         stim_name = info["stim_name"]
         title_in_graph = "Participant {}".format(self.participant_id)
-        
-        # Use enhanced analysis instead of basic analysis
-        # TODO: USE NORMAL SMS ANALYSIS HERE!
-        _, extracted_onsets, stats = enhanced_tapping_analysis(
-            audio_file, title_in_graph, output_plot, stim_info=info)
-                        
-        # Extract the quality results from stats
-        is_failed = stats.get("failed", True)
-        reason = stats.get("reason", "Analysis failed")
 
-        extracted_onsets_json = json.dumps(extracted_onsets, cls=NumpySerializer)
-        stats = json.dumps(stats, cls=NumpySerializer)
+        analysis = REPPAnalysis(config=sms_tapping)
+        output, analysis, is_failed = analysis.do_analysis(
+            info, audio_file, title_in_graph, output_plot
+        )
+        output = json.dumps(output, cls=NumpySerializer)
+        analysis = json.dumps(analysis, cls=NumpySerializer)
         
         return {
-            "failed": is_failed,
-            "reason": reason,
-            "extracted_onsets": extracted_onsets_json,
-            "stats": stats,
+            "failed": is_failed["failed"],
+            "reason": is_failed["reason"],
+            "output": output,
+            "analysis": analysis,
             "stim_name": stim_name,
         }
 
 class TapTrialISO(TapTrialAnalysisISO):
-    time_estimate = DURATION_ESTIMATED_TRIAL
+    time_estimate = 10
     
     def show_trial(self, experiment, participant):
         info = self.get_info()
@@ -329,7 +383,7 @@ class TapTrialISO(TapTrialAnalysisISO):
                 self.assets["stimulus_audio"].url,
                 Markup(
                     f"""
-                    <br><h3>Tap in time to the musical beat.</h3>
+                    <br><h3>Tap in time to the beat.</h3>
                     Trial number {trial_number} out of {NUM_TRIALS_PER_PARTICIPANT_ISO}  trials.
                     """
                 ),
@@ -380,6 +434,20 @@ class TapTrialISO(TapTrialAnalysisISO):
 
 # class for explore tapping trials
 class TapTrialAnalysisExplore(AudioRecordTrial, StaticTrial):
+    def format_answer(self, raw_answer, **kwargs):
+        """Add the Recording asset to trial.assets so async_post_trial can find it.
+
+        The AudioRecordControl creates the Recording but does not add it to trial.assets.
+        RecordTrial.recording looks in trial.assets, so we must add it here before
+        async_post_trial runs (which triggers analyse_recording).
+        """
+        answer = raw_answer
+        if isinstance(answer, dict) and answer.get("supports_record_trial") and "asset_id" in answer:
+            asset = ExperimentAsset.query.filter_by(id=answer["asset_id"]).one()
+            if asset not in self.assets.values():
+                self.add_asset("recording", asset)
+        return answer
+
     def get_info(self):
         with tempfile.NamedTemporaryFile() as f:
             self.assets["stimulus_info"].export(f.name)
@@ -409,16 +477,15 @@ class TapTrialAnalysisExplore(AudioRecordTrial, StaticTrial):
         analysis_json = json.dumps(analysis, cls=NumpySerializer)
 
         # scoring
-        # TARGET_RHYTHM = [1,2,1]
         TARGET_RHYTHM = [int(char) for char in stim_name]
         tapping_iois = analysis["tapping_iois"]
         num_taps_detected = analysis["num_taps_detected"]
 
         # print code to debug
-        # print(f"DEBUG analyze_recording: stim_name={stim_name}, TARGET_RHYTHM={TARGET_RHYTHM}")
-        # print(f"DEBUG analyze_recording: tapping_iois={tapping_iois}, type={type(tapping_iois)}")
-        # print(f"DEBUG analyze_recording: num_taps_detected={num_taps_detected}")
-        # print(f"DEBUG analyze_recording: analysis keys={list(analysis.keys()) if isinstance(analysis, dict) else 'N/A'}")
+        print(f"DEBUG analyze_recording: stim_name={stim_name}, TARGET_RHYTHM={TARGET_RHYTHM}")
+        print(f"DEBUG analyze_recording: tapping_iois={tapping_iois}, type={type(tapping_iois)}")
+        print(f"DEBUG analyze_recording: num_taps_detected={num_taps_detected}")
+        print(f"DEBUG analyze_recording: analysis keys={list(analysis.keys()) if isinstance(analysis, dict) else 'N/A'}")
 
         score = scoring_function(TARGET_RHYTHM, tapping_iois)
         
@@ -457,7 +524,7 @@ class TapTrialExplore(TapTrialAnalysisExplore):
                     <br>
                     <br>
                     <i>Target rhythm = {TARGET_RHYTHM}</i><br>
-                    <i>Trial number {trial_number} out of {NUM_TRIALS_PER_PARTICIPANT_EXPLORE} trials.</i>
+                    <i>Trial number {trial_number} out of {NUM_TRIALS_PER_TARGET} trials.</i>
                     """
                 ),
             ),
@@ -502,6 +569,7 @@ class TapTrialExplore(TapTrialAnalysisExplore):
                 return {
             "121": "boot_responses/example_silence_10sec.wav",
             "112": "boot_responses/example_silence_10sec.wav",
+            "332": "boot_responses/example_silence_10sec.wav",
         }[self.definition["stim_name"]]
 
     def gives_feedback(self, experiment, participant):
@@ -509,7 +577,6 @@ class TapTrialExplore(TapTrialAnalysisExplore):
 
     def show_feedback(self, experiment, participant):
         output_analysis = self.analysis
-        tapping_iois = output_analysis["tapping_iois"]
         num_taps_detected = output_analysis["num_taps_detected"]
         score = output_analysis["score"]
 
@@ -616,33 +683,59 @@ ISO_tapping = join(
     ),
 )
 
-
-silent_tapping = join(
-    InfoPage(
-        Markup(
-            """
-            <h3>NEW TASK</h3>
-            <hr>
-            EXPLAIN HERE INSTRUCTION OF NEW TASK: FIND THE HIDDEN RHYTHM BY TAPPING!
-            <hr>
-            """
-        ),
-        time_estimate=10,
+instructions_explore_tapping = InfoPage(
+    Markup(
+        """
+        <h3>NEW TASK</h3>
+        <hr>
+        EXPLAIN HERE INSTRUCTION OF NEW TASK: FIND THE HIDDEN RHYTHM BY TAPPING!
+        <hr>
+        """
     ),
-    StaticTrialMaker(
-        id_="silent_tapping",
-        trial_class=TapTrialExplore,
-        nodes=nodes_silent,
-        expected_trials_per_participant=4,
-        max_trials_per_participant=4,
-        allow_repeated_nodes=True,
-        target_n_participants=NUM_PARTICIPANTS,
-        recruit_mode="n_participants",
-        # check_performance_every_trial=True,
-        check_performance_at_end=False,
-    ),
+    time_estimate=10,
 )
 
+explore_tapping_target1 = StaticTrialMaker(
+    id_="explore_tapping_target1",
+    trial_class=TapTrialExplore,
+    nodes=nodes_target1,
+    expected_trials_per_participant=NUM_TRIALS_PER_TARGET,
+    max_trials_per_participant=NUM_TRIALS_PER_TARGET,
+    allow_repeated_nodes=True,
+    n_repeat_trials=0,
+    target_n_participants=NUM_PARTICIPANTS,
+    recruit_mode="n_participants",
+    # check_performance_every_trial=True,
+    check_performance_at_end=False,
+    )
+
+explore_tapping_target2 = StaticTrialMaker(
+    id_="explore_tapping_target2",
+    trial_class=TapTrialExplore,
+    nodes=nodes_target2,
+    expected_trials_per_participant=NUM_TRIALS_PER_TARGET,
+    max_trials_per_participant=NUM_TRIALS_PER_TARGET,
+    allow_repeated_nodes=True,
+    n_repeat_trials=0,
+    target_n_participants=NUM_PARTICIPANTS,
+    recruit_mode="n_participants",
+    # check_performance_every_trial=True,
+    check_performance_at_end=False,
+    )
+
+explore_tapping_target3 = StaticTrialMaker(
+    id_="explore_tapping_target3",
+    trial_class=TapTrialExplore,
+    nodes=nodes_target3,
+    expected_trials_per_participant=NUM_TRIALS_PER_TARGET,
+    max_trials_per_participant=NUM_TRIALS_PER_TARGET,
+    allow_repeated_nodes=True,
+    n_repeat_trials=0,
+    target_n_participants=NUM_PARTICIPANTS,
+    recruit_mode="n_participants",
+    # check_performance_every_trial=True,
+    check_performance_at_end=False,
+    )
 
 ########################################################################################################################
 # Timeline
@@ -666,9 +759,15 @@ class Exp(psynet.experiment.Experiment):
         timeline = Timeline(
             NoConsent(),
             welcome(),
-            # REPPVolumeCalibrationMusic(),
-            # ISO_tapping, # TODO: Uncomment this when ISO tapping is fixed
-            silent_tapping,
+            REPPVolumeCalibrationMusic(),  # calibrate volume with music
+            REPPMarkersTest(),  # pre-screening filtering participants based on recording test (markers)
+            REPPTappingCalibration(),  # calibrate tapping
+            ISO_tapping,
+            instructions_explore_tapping,
+            randomize(
+                label = "targets",
+                logic = [explore_tapping_target1, explore_tapping_target2, explore_tapping_target3]
+            ),
             SuccessfulEndPage(),
         )
     else:
