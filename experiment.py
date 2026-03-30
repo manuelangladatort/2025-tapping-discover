@@ -65,7 +65,7 @@ AUTO_RECRUIT = False # Keep recruiting until we have NUM_PARTICIPANTS participan
 NUM_TRIALS_PER_PARTICIPANT_ISO = 2 # practice trials
 
 # Per trial maker: 1 target × N trials (participant repeats the same trial N times)
-NUM_TRIALS_PER_TARGET = 1  # 25 repetitions of the same trial within each trial maker
+NUM_TRIALS_PER_TARGET = 25  # 25 repetitions of the same trial within each trial maker
     
 DURATION_ESTIMATED_TRIAL = 10 # estimated duration of each trial in seconds
 
@@ -297,58 +297,6 @@ def generate_music_stimulus_info(path, stim_name, audio_filename):
     stim_prepared, info = create_music_stim_with_repp_beat_finding(stim_name, audio_filename)
     save_json_to_file(info, path)
 
-reward_nodes_target1 = [
-    StaticNode(
-        definition={
-            "stim_name": TARGET_NODE_1,
-            "audio_filename": "music/silence_3sec.wav",
-        },
-        assets={
-            "stimulus_audio": CachedFunctionAsset(generate_music_stimulus_audio),
-            "stimulus_info": CachedFunctionAsset(generate_music_stimulus_info),
-        },
-    )
-]
-
-reward_nodes_target2 = [
-    StaticNode(
-        definition={
-            "stim_name": TARGET_NODE_2,
-            "audio_filename": "music/silence_3sec.wav",
-        },
-        assets={
-            "stimulus_audio": CachedFunctionAsset(generate_music_stimulus_audio),
-            "stimulus_info": CachedFunctionAsset(generate_music_stimulus_info),
-        },
-    )
-]
-
-punishment_nodes_target1 = [
-    StaticNode(
-        definition={
-            "stim_name": TARGET_NODE_1,
-            "audio_filename": "music/silence_3sec.wav",
-        },
-        assets={
-            "stimulus_audio": CachedFunctionAsset(generate_music_stimulus_audio),
-            "stimulus_info": CachedFunctionAsset(generate_music_stimulus_info),
-        },
-    )
-]
-
-punishment_nodes_target2 = [
-    StaticNode(
-        definition={
-            "stim_name": TARGET_NODE_2,
-            "audio_filename": "music/silence_3sec.wav",
-        },
-        assets={
-            "stimulus_audio": CachedFunctionAsset(generate_music_stimulus_audio),
-            "stimulus_info": CachedFunctionAsset(generate_music_stimulus_info),
-        },
-    )
-]
-
 reward_nodes_target1a = [
     StaticNode(
         definition={
@@ -483,6 +431,19 @@ nodes_training = [
     StaticNode(
         definition={
             "stim_name": "121",
+            "audio_filename": "music/silence_3sec.wav"
+        },
+        assets={
+            "stimulus_audio": CachedFunctionAsset(generate_music_stimulus_audio),
+            "stimulus_info": CachedFunctionAsset(generate_music_stimulus_info),
+        },
+    )
+]
+
+nodes_regular_tapping = [
+    StaticNode(
+        definition={
+            "stim_name": "111",
             "audio_filename": "music/silence_3sec.wav"
         },
         assets={
@@ -666,6 +627,7 @@ class TapTrialAnalysisExplore(AudioRecordTrial, StaticTrial):
 
     def get_bot_response_media(self):
         return {
+            "111": "boot_responses/example_silence_10sec.wav",
             "121": "boot_responses/example_silence_10sec.wav",
             "112": "boot_responses/example_silence_10sec.wav",
             "332": "boot_responses/example_silence_10sec.wav",
@@ -765,7 +727,8 @@ class TapTrialExplore(TapTrialAnalysisExplore):
                         f"""
                         <h3>Feedback</h3>
                         <hr>
-                        Your penalty score is <b>{score}</b>.
+                        <div style="font-size: 1.4em; text-align: center;">Your penalty score is</div>
+                        <div style="font-size: 3em; font-weight: bold; text-align: center; margin: 0.35em 0;">{score}</div>
                         <hr>
                         """
                     ),
@@ -774,10 +737,11 @@ class TapTrialExplore(TapTrialAnalysisExplore):
             else:
                 return InfoPage(
                     Markup(
-                        f"""
+                       f"""
                         <h3>Feedback</h3>
                         <hr>
-                        Your score is <b>{score}</b>.
+                        <div style="font-size: 1.4em; text-align: center;">Your score is</div>
+                        <div style="font-size: 3em; font-weight: bold; text-align: center; margin: 0.35em 0;">{score}</div>
                         <hr>
                         """
                     ),
@@ -1054,6 +1018,72 @@ def welcome():
         time_estimate=3,
     )
 
+class RegularTappingTrial(TapTrialAnalysisExplore):
+    score_mode = "reward"
+    time_estimate = DURATION_ESTIMATED_TRIAL
+
+    def show_trial(self, experiment, participant):
+        info = self.get_info()
+        duration_rec = info["stim_duration"]
+        regular_trial_number = self.position + 1
+
+        return ModularPage(
+            f"trial_main_page_regular_tapping_{self.id}",
+            AudioPrompt(
+                self.assets["stimulus_audio"].url,
+                Markup(
+                    f"""
+                    <br><h3>Keeping Regular Tapping</h3>
+                    <b>Produce exactly 4 taps during the green phase.</b>
+                    <br><br>
+                    Aim to produce <b>4 regular intervals</b>, with the same interval between taps.
+                    <br><br>
+                    Try to reproduce exactly the same regular tapping pattern on every attempt.
+                    <br><br>
+                    <i>Attempt {regular_trial_number} out of 15.</i>
+                    """
+                ),
+            ),
+            AudioRecordControl(
+                duration=duration_rec,
+                show_meter=False,
+                controls=False,
+                auto_advance=False,
+                bot_response_media=self.get_bot_response_media(),
+            ),
+            time_estimate=duration_rec + 5,
+            progress_display=ProgressDisplay(
+                show_bar=True,
+                stages=[
+                    ProgressStage(
+                        3.5,
+                        "Wait in silence...",
+                        "red",
+                    ),
+                    ProgressStage(
+                        [3.5, (duration_rec - 6)],
+                        "START TAPPING!",
+                        "green",
+                    ),
+                    ProgressStage(
+                        3.5,
+                        "Stop tapping and wait in silence...",
+                        "red",
+                        persistent=False,
+                    ),
+                    ProgressStage(
+                        0.5,
+                        "Press Next when you are ready to continue...",
+                        "orange",
+                        persistent=True,
+                    ),
+                ],
+            ),
+        )
+
+    def gives_feedback(self, experiment, participant):
+        return False
+
 class FamiliarisationIntroPage(InfoPage):
     def on_arrival(self, experiment, participant):
         participant.var.set("familiarisation_first_success", False)
@@ -1161,6 +1191,20 @@ training_trials = StaticTrialMaker(
 )
 training_trials.time_estimate = 5 * (DURATION_ESTIMATED_TRIAL + 2)
 
+regular_tapping_trials = StaticTrialMaker(
+    id_="regular_tapping_trials",
+    trial_class=RegularTappingTrial,
+    nodes=nodes_regular_tapping,
+    expected_trials_per_participant=15,
+    max_trials_per_participant=15,
+    allow_repeated_nodes=True,
+    n_repeat_trials=0,
+    target_n_participants=NUM_PARTICIPANTS,
+    recruit_mode="n_participants",
+    check_performance_at_end=False,
+)
+regular_tapping_trials.time_estimate = 15 * (DURATION_ESTIMATED_TRIAL + 2)
+
 instructions_explore_tapping = InfoPage(
     Markup(
         f"""
@@ -1187,6 +1231,26 @@ instructions_explore_tapping = InfoPage(
         """
     ),
     time_estimate=10,
+)
+
+regular_tapping_intro = InfoPage(
+    Markup(
+        """
+        <br><h3>Keeping Regular Tapping</h3>
+        <hr>
+        Now your final goal is different: produce <b>exactly 4 taps</b> during the <b>green</b> phase.
+        <br><br>
+        But aim to produce <b>4 regular intervals</b>, with the same interval between taps.
+        <br><br>
+        Try to reproduce exactly the same regular tapping pattern every attempt.
+        <br><br>
+        You will not receive a score for this, but try to be consistent in your tapping.
+        <br><br>
+        Press <b>Next</b> when you are ready to start.
+        <hr>
+        """
+    ),
+    time_estimate=5,
 )
 
 break_after_reward_1 = InfoPage(
@@ -1271,20 +1335,6 @@ custom_end_page = InfoPage(
     time_estimate=3,
 )
 
-reward_explore_tapping_target1 = StaticTrialMaker(
-    id_="reward_explore_tapping_target1",
-    trial_class=RewardTapTrialExplore,
-    nodes=reward_nodes_target1,
-    expected_trials_per_participant=NUM_TRIALS_PER_TARGET,
-    max_trials_per_participant=NUM_TRIALS_PER_TARGET,
-    allow_repeated_nodes=True,
-    n_repeat_trials=0,
-    target_n_participants=NUM_PARTICIPANTS,
-    recruit_mode="n_participants",
-    check_performance_at_end=False,
-)
-reward_explore_tapping_target1.time_estimate = NUM_TRIALS_PER_TARGET * (DURATION_ESTIMATED_TRIAL + 2)
-
 reward_explore_tapping_target1a = StaticTrialMaker(
     id_="reward_explore_tapping_target1a",
     trial_class=RewardTapTrialExplore,
@@ -1312,20 +1362,6 @@ reward_explore_tapping_target1b = StaticTrialMaker(
     check_performance_at_end=False,
 )
 reward_explore_tapping_target1b.time_estimate = NUM_TRIALS_PER_TARGET * (DURATION_ESTIMATED_TRIAL + 2)
-
-reward_explore_tapping_target2 = StaticTrialMaker(
-    id_="reward_explore_tapping_target2",
-    trial_class=RewardTapTrialExplore,
-    nodes=reward_nodes_target2,
-    expected_trials_per_participant=NUM_TRIALS_PER_TARGET,
-    max_trials_per_participant=NUM_TRIALS_PER_TARGET,
-    allow_repeated_nodes=True,
-    n_repeat_trials=0,
-    target_n_participants=NUM_PARTICIPANTS,
-    recruit_mode="n_participants",
-    check_performance_at_end=False,
-)
-reward_explore_tapping_target2.time_estimate = NUM_TRIALS_PER_TARGET * (DURATION_ESTIMATED_TRIAL + 2)
 
 reward_explore_tapping_target2a = StaticTrialMaker(
     id_="reward_explore_tapping_target2a",
@@ -1355,20 +1391,6 @@ reward_explore_tapping_target2b = StaticTrialMaker(
 )
 reward_explore_tapping_target2b.time_estimate = NUM_TRIALS_PER_TARGET * (DURATION_ESTIMATED_TRIAL + 2)
 
-punishment_explore_tapping_target1 = StaticTrialMaker(
-    id_="punishment_explore_tapping_target1",
-    trial_class=PunishmentTapTrialExplore,
-    nodes=punishment_nodes_target1,
-    expected_trials_per_participant=NUM_TRIALS_PER_TARGET,
-    max_trials_per_participant=NUM_TRIALS_PER_TARGET,
-    allow_repeated_nodes=True,
-    n_repeat_trials=0,
-    target_n_participants=NUM_PARTICIPANTS,
-    recruit_mode="n_participants",
-    check_performance_at_end=False,
-)
-punishment_explore_tapping_target1.time_estimate = NUM_TRIALS_PER_TARGET * (DURATION_ESTIMATED_TRIAL + 2)
-
 punishment_explore_tapping_target1a = StaticTrialMaker(
     id_="punishment_explore_tapping_target1a",
     trial_class=PunishmentTapTrialExplore,
@@ -1396,20 +1418,6 @@ punishment_explore_tapping_target1b = StaticTrialMaker(
     check_performance_at_end=False,
 )
 punishment_explore_tapping_target1b.time_estimate = NUM_TRIALS_PER_TARGET * (DURATION_ESTIMATED_TRIAL + 2)
-
-punishment_explore_tapping_target2 = StaticTrialMaker(
-    id_="punishment_explore_tapping_target2",
-    trial_class=PunishmentTapTrialExplore,
-    nodes=punishment_nodes_target2,
-    expected_trials_per_participant=NUM_TRIALS_PER_TARGET,
-    max_trials_per_participant=NUM_TRIALS_PER_TARGET,
-    allow_repeated_nodes=True,
-    n_repeat_trials=0,
-    target_n_participants=NUM_PARTICIPANTS,
-    recruit_mode="n_participants",
-    check_performance_at_end=False,
-)
-punishment_explore_tapping_target2.time_estimate = NUM_TRIALS_PER_TARGET * (DURATION_ESTIMATED_TRIAL + 2)
 
 punishment_explore_tapping_target2a = StaticTrialMaker(
     id_="punishment_explore_tapping_target2a",
@@ -1498,6 +1506,8 @@ class Exp(psynet.experiment.Experiment):
                     reward_explore_tapping_target2b,
                 ]
             ),
+            regular_tapping_intro,
+            regular_tapping_trials,
             custom_end_page,
             SuccessfulEndPage(),
         )
@@ -1546,6 +1556,8 @@ class Exp(psynet.experiment.Experiment):
                     reward_explore_tapping_target2b,
                 ]
             ),
+            regular_tapping_intro,
+            regular_tapping_trials,
             custom_end_page,
             SuccessfulEndPage()
         )
