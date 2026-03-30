@@ -21,7 +21,7 @@ from psynet.asset import CachedFunctionAsset, ExperimentAsset, LocalStorage
 from psynet.consent import NoConsent
 from psynet.modular_page import AudioPrompt, AudioRecordControl, ModularPage
 from psynet.page import InfoPage, SuccessfulEndPage
-from psynet.timeline import ProgressDisplay, ProgressStage, Timeline, join, randomize
+from psynet.timeline import Module, ProgressDisplay, ProgressStage, Timeline, join, randomize, while_loop
 from psynet.trial.audio import AudioRecordTrial
 from psynet.trial.static import StaticNode, StaticTrial, StaticTrialMaker
 
@@ -30,6 +30,7 @@ from psynet.trial.static import StaticNode, StaticTrial, StaticTrialMaker
 from .repp_beatfinding.beat_detection import do_beat_detection_analysis
 
 # repp
+
 from .repp_prescreens import (
     NumpySerializer,
     REPPMarkersTest,
@@ -37,23 +38,22 @@ from .repp_prescreens import (
     REPPVolumeCalibrationMusic,
 )
 
+class REPPMarkersTestRepeat(REPPMarkersTest):
+    label = "repp_markers_test_repeat"
+
 ########################################################################################################################
 # TODOS
 ########################################################################################################################
 # TODO: reduce beeps in marker from 3 to 1.
 # TODO: Add learning phase so participant understand the task.
 
-
-########################################################################################################################
-# Targets
-########################################################################################################################
-# Three targets: 121, 112, 332
-
-
 ########################################################################################################################
 # SETUP
 ########################################################################################################################
 DEBUG = True
+MAIN_TASK_ORDER = "punishment_first"  # change: "reward_first" or "punishment_first"
+TARGET_NODE_1 = "323" # first target
+TARGET_NODE_2 = "332" # second target
 
 # recruitment
 RECRUITER = "prolific" # prolific vs hotair vs generic
@@ -65,9 +65,7 @@ AUTO_RECRUIT = False # Keep recruiting until we have NUM_PARTICIPANTS participan
 NUM_TRIALS_PER_PARTICIPANT_ISO = 2 # practice trials
 
 # Per trial maker: 1 target × N trials (participant repeats the same trial N times)
-NUM_TRIALS_PER_TARGET = 30  # 30 repetitions of the same trial within each trial maker
-if DEBUG:
-    NUM_TRIALS_PER_TARGET = 3
+NUM_TRIALS_PER_TARGET = 1  # 25 repetitions of the same trial within each trial maker
     
 DURATION_ESTIMATED_TRIAL = 10 # estimated duration of each trial in seconds
 
@@ -102,35 +100,61 @@ def get_prolific_settings():
         "prolific_recruitment_config": qualification,
         "base_payment": 2.1,
         "currency": "£",
-        "wage_per_hour": 0.01
+        "wage_per_hour": 0.01,
+        # "prolific_workspace": "Goldsmiths",
+        # "prolific_project": "Pilot",
     }
 
 
 ########################################################################################################################
+########################################################################################################################
 # Scoring function
 ########################################################################################################################
 def scale_to_target(target, vector):
-    scale_factor = min(target) / min(vector)
-    return [v * scale_factor for v in vector]
+    total = sum(vector)
+    if total == 0:
+        return vector
+    return [v / total * sum(target) for v in vector]
 
-def scoring_function(target, tapping_iois):
+
+def reward_scoring_function(target, tapping_iois):
     perc = 0.3
-    D = 1.5
-    a = 10
-    b = 40
+    D = 1.55
+    a = 15
+    b = 45
 
     # Need at least 3 IOIs to compare against a 3-element target rhythm
     if len(tapping_iois) < 3 or len(target) < 3:
-        return 0  # Minimum score for insufficient data
+        return 0
+
+    # Use the first 3 IOIs if more were recorded
+    tapping_iois = tapping_iois[:3]
 
     iois_final = scale_to_target(target, tapping_iois)
-    sum_of_diff = [(abs(iois_final[i] - target[i])) for i in range(3)]
-    error = norm(sum_of_diff)
-    
-    score = math.exp(-(error) * perc) * 100
+    error = norm([iois_final[i] - target[i] for i in range(3)])
+
+    score = math.exp(-error * perc) * 100
     final_score = a + (score - b) * D
-    
+    final_score = max(0, min(100, final_score))
+
     return round(final_score)
+
+
+
+def punishment_scoring_function(target, tapping_iois):
+    reward_score = reward_scoring_function(target, tapping_iois)
+    punishment_score = reward_score - 100
+    punishment_score = max(-100, min(0, punishment_score))
+    return round(punishment_score)
+
+
+def scoring_function(target, tapping_iois, mode):
+    if mode == "reward":
+        return reward_scoring_function(target, tapping_iois)
+    elif mode == "punishment":
+        return punishment_scoring_function(target, tapping_iois)
+    else:
+        raise ValueError(f"Unknown SCORE_MODE: {mode}")
 
 
 
@@ -173,7 +197,6 @@ nodes_iso = [
     )
     for name, iois in zip(iso_stimulus_names, iso_stimulus_onsets)
 ]
-
 
 # Stilent stimuli for explore tapping task (no onsets required)
 music_stimulus_name = ["121", "112"] # TODO: Replace with actual targets (seed interval categories)
@@ -274,26 +297,167 @@ def generate_music_stimulus_info(path, stim_name, audio_filename):
     stim_prepared, info = create_music_stim_with_repp_beat_finding(stim_name, audio_filename)
     save_json_to_file(info, path)
 
-# nodes_silent = [
-#     StaticNode(
-#         definition={
-#             "stim_name": name,
-#             "audio_filename": audio,
-#         },
-#         assets={
-#             "stimulus_audio": CachedFunctionAsset(generate_music_stimulus_audio),
-#             "stimulus_info": CachedFunctionAsset(generate_music_stimulus_info),
-#         },
-#     )
-#      for name, audio in zip(music_stimulus_name, music_stimulus_audio)
-# ]
+reward_nodes_target1 = [
+    StaticNode(
+        definition={
+            "stim_name": TARGET_NODE_1,
+            "audio_filename": "music/silence_3sec.wav",
+        },
+        assets={
+            "stimulus_audio": CachedFunctionAsset(generate_music_stimulus_audio),
+            "stimulus_info": CachedFunctionAsset(generate_music_stimulus_info),
+        },
+    )
+]
 
+reward_nodes_target2 = [
+    StaticNode(
+        definition={
+            "stim_name": TARGET_NODE_2,
+            "audio_filename": "music/silence_3sec.wav",
+        },
+        assets={
+            "stimulus_audio": CachedFunctionAsset(generate_music_stimulus_audio),
+            "stimulus_info": CachedFunctionAsset(generate_music_stimulus_info),
+        },
+    )
+]
 
-nodes_target1 = [
+punishment_nodes_target1 = [
+    StaticNode(
+        definition={
+            "stim_name": TARGET_NODE_1,
+            "audio_filename": "music/silence_3sec.wav",
+        },
+        assets={
+            "stimulus_audio": CachedFunctionAsset(generate_music_stimulus_audio),
+            "stimulus_info": CachedFunctionAsset(generate_music_stimulus_info),
+        },
+    )
+]
+
+punishment_nodes_target2 = [
+    StaticNode(
+        definition={
+            "stim_name": TARGET_NODE_2,
+            "audio_filename": "music/silence_3sec.wav",
+        },
+        assets={
+            "stimulus_audio": CachedFunctionAsset(generate_music_stimulus_audio),
+            "stimulus_info": CachedFunctionAsset(generate_music_stimulus_info),
+        },
+    )
+]
+
+reward_nodes_target1a = [
+    StaticNode(
+        definition={
+            "stim_name": TARGET_NODE_1,
+            "audio_filename": "music/silence_3sec.wav",
+        },
+        assets={
+            "stimulus_audio": CachedFunctionAsset(generate_music_stimulus_audio),
+            "stimulus_info": CachedFunctionAsset(generate_music_stimulus_info),
+        },
+    )
+]
+
+reward_nodes_target1b = [
+    StaticNode(
+        definition={
+            "stim_name": TARGET_NODE_1,
+            "audio_filename": "music/silence_3sec.wav",
+        },
+        assets={
+            "stimulus_audio": CachedFunctionAsset(generate_music_stimulus_audio),
+            "stimulus_info": CachedFunctionAsset(generate_music_stimulus_info),
+        },
+    )
+]
+
+reward_nodes_target2a = [
+    StaticNode(
+        definition={
+            "stim_name": TARGET_NODE_2,
+            "audio_filename": "music/silence_3sec.wav",
+        },
+        assets={
+            "stimulus_audio": CachedFunctionAsset(generate_music_stimulus_audio),
+            "stimulus_info": CachedFunctionAsset(generate_music_stimulus_info),
+        },
+    )
+]
+
+reward_nodes_target2b = [
+    StaticNode(
+        definition={
+            "stim_name": TARGET_NODE_2,
+            "audio_filename": "music/silence_3sec.wav",
+        },
+        assets={
+            "stimulus_audio": CachedFunctionAsset(generate_music_stimulus_audio),
+            "stimulus_info": CachedFunctionAsset(generate_music_stimulus_info),
+        },
+    )
+]
+
+punishment_nodes_target1a = [
+    StaticNode(
+        definition={
+            "stim_name": TARGET_NODE_1,
+            "audio_filename": "music/silence_3sec.wav",
+        },
+        assets={
+            "stimulus_audio": CachedFunctionAsset(generate_music_stimulus_audio),
+            "stimulus_info": CachedFunctionAsset(generate_music_stimulus_info),
+        },
+    )
+]
+
+punishment_nodes_target1b = [
+    StaticNode(
+        definition={
+            "stim_name": TARGET_NODE_1,
+            "audio_filename": "music/silence_3sec.wav",
+        },
+        assets={
+            "stimulus_audio": CachedFunctionAsset(generate_music_stimulus_audio),
+            "stimulus_info": CachedFunctionAsset(generate_music_stimulus_info),
+        },
+    )
+]
+
+punishment_nodes_target2a = [
+    StaticNode(
+        definition={
+            "stim_name": TARGET_NODE_2,
+            "audio_filename": "music/silence_3sec.wav",
+        },
+        assets={
+            "stimulus_audio": CachedFunctionAsset(generate_music_stimulus_audio),
+            "stimulus_info": CachedFunctionAsset(generate_music_stimulus_info),
+        },
+    )
+]
+
+punishment_nodes_target2b = [
+    StaticNode(
+        definition={
+            "stim_name": TARGET_NODE_2,
+            "audio_filename": "music/silence_3sec.wav",
+        },
+        assets={
+            "stimulus_audio": CachedFunctionAsset(generate_music_stimulus_audio),
+            "stimulus_info": CachedFunctionAsset(generate_music_stimulus_info),
+        },
+    )
+]
+
+nodes_familiarisation = [
     StaticNode(
         definition={
             "stim_name": "121",
-            "audio_filename": "music/silence_3sec.wav",
+            "audio_filename": "music/silence_3sec.wav"
         },
         assets={
             "stimulus_audio": CachedFunctionAsset(generate_music_stimulus_audio),
@@ -302,11 +466,11 @@ nodes_target1 = [
     )
 ]
 
-nodes_target2 = [
+nodes_familiarisation_second = [
     StaticNode(
         definition={
-            "stim_name": "112",
-            "audio_filename": "music/silence_3sec.wav",
+            "stim_name": "121",
+            "audio_filename": "music/silence_3sec.wav"
         },
         assets={
             "stimulus_audio": CachedFunctionAsset(generate_music_stimulus_audio),
@@ -315,11 +479,11 @@ nodes_target2 = [
     )
 ]
 
-nodes_target3 = [
+nodes_training = [
     StaticNode(
         definition={
-            "stim_name": "332",
-            "audio_filename": "music/silence_3sec.wav",
+            "stim_name": "121",
+            "audio_filename": "music/silence_3sec.wav"
         },
         assets={
             "stimulus_audio": CachedFunctionAsset(generate_music_stimulus_audio),
@@ -378,13 +542,13 @@ class TapTrialISO(TapTrialAnalysisISO):
         duration_rec = info["stim_duration"]
         trial_number = self.position + 1
         return ModularPage(
-            "trial_main_page",
+            f"trial_main_page_iso_{self.id}",
             AudioPrompt(
                 self.assets["stimulus_audio"].url,
                 Markup(
                     f"""
                     <br><h3>Tap in time to the beat.</h3>
-                    Trial number {trial_number} out of {NUM_TRIALS_PER_PARTICIPANT_ISO}  trials.
+                    Attempt number {trial_number} out of {NUM_TRIALS_PER_PARTICIPANT_ISO} attempts.
                     """
                 ),
             ),
@@ -397,7 +561,7 @@ class TapTrialISO(TapTrialAnalysisISO):
             ),
             time_estimate=duration_rec + 5,
             progress_display=ProgressDisplay(
-                show_bar=True,  # set to False to hide progress bar in movement
+                show_bar=True,
                 stages=[
                     ProgressStage(
                         3.5,
@@ -431,8 +595,6 @@ class TapTrialISO(TapTrialAnalysisISO):
             "iso_600ms": "boot_responses/example_iso_fast_tap.wav",
         }[self.definition["stim_name"]]
 
-
-# class for explore tapping trials
 class TapTrialAnalysisExplore(AudioRecordTrial, StaticTrial):
     def format_answer(self, raw_answer, **kwargs):
         """Add the Recording asset to trial.assets so async_post_trial can find it.
@@ -487,7 +649,7 @@ class TapTrialAnalysisExplore(AudioRecordTrial, StaticTrial):
         print(f"DEBUG analyze_recording: num_taps_detected={num_taps_detected}")
         print(f"DEBUG analyze_recording: analysis keys={list(analysis.keys()) if isinstance(analysis, dict) else 'N/A'}")
 
-        score = scoring_function(TARGET_RHYTHM, tapping_iois)
+        score = scoring_function(TARGET_RHYTHM, tapping_iois, mode=self.score_mode)
         
         
         return {
@@ -502,29 +664,47 @@ class TapTrialAnalysisExplore(AudioRecordTrial, StaticTrial):
             "stim_name": stim_name,
         }
 
+    def get_bot_response_media(self):
+        return {
+            "121": "boot_responses/example_silence_10sec.wav",
+            "112": "boot_responses/example_silence_10sec.wav",
+            "332": "boot_responses/example_silence_10sec.wav",
+            "233": "boot_responses/example_silence_10sec.wav",
+            "323": "boot_responses/example_silence_10sec.wav",
+        }[self.definition["stim_name"]]
 
 class TapTrialExplore(TapTrialAnalysisExplore):
     time_estimate = DURATION_ESTIMATED_TRIAL
     
     def show_trial(self, experiment, participant):
         info = self.get_info()
-        stim_name = info["stim_name"]
-        TARGET_RHYTHM = [int(char) for char in stim_name]
+        # stim_name = info["stim_name"]
+        # TARGET_RHYTHM = [int(char) for char in stim_name]
 
         duration_rec = info["stim_duration"]
-        trial_number = self.position + 1
+        total_main_trials = NUM_TRIALS_PER_TARGET * 4
+
+        explore_trial_numbers = participant.var.get("explore_trial_numbers", {})
+        trial_key = str(self.id)
+
+        if trial_key not in explore_trial_numbers:
+            next_trial_number = participant.var.get("explore_trial_counter", 0) + 1
+            explore_trial_numbers[trial_key] = next_trial_number
+            participant.var.set("explore_trial_numbers", explore_trial_numbers)
+            participant.var.set("explore_trial_counter", next_trial_number)
+
+        overall_trial_number = explore_trial_numbers[trial_key]
+
         return ModularPage(
-            "trial_main_page",
+            f"trial_main_page_explore_{self.id}",
             AudioPrompt(
                 self.assets["stimulus_audio"].url,
                 Markup(
                     f"""
                     <br><h3>Find the hidden rhythm</h3>
-                    The rhythm has exactly 4 taps. The gaps can be short or long, this is what creates the rhythm. Try tapping different patterns!
-                    <br>
-                    <br>
-                    <i>Target rhythm = {TARGET_RHYTHM}</i><br>
-                    <i>Trial number {trial_number} out of {NUM_TRIALS_PER_TARGET} trials.</i>
+                    <b>Produce 4 taps. Explore different rhythms.</b>
+                    <br><br>
+                    <i>Attempt number {overall_trial_number} out of {total_main_trials} attempts.</i>
                     """
                 ),
             ),
@@ -537,7 +717,7 @@ class TapTrialExplore(TapTrialAnalysisExplore):
             ),
             time_estimate=duration_rec + 5,
             progress_display=ProgressDisplay(
-                show_bar=True,  # set to False to hide progress bar in movement
+                show_bar=True,
                 stages=[
                     ProgressStage(
                         3.5,
@@ -564,13 +744,6 @@ class TapTrialExplore(TapTrialAnalysisExplore):
                 ],
             ),
         )
-    
-    def get_bot_response_media(self): # TODO: add silent example for bot response
-                return {
-            "121": "boot_responses/example_silence_10sec.wav",
-            "112": "boot_responses/example_silence_10sec.wav",
-            "332": "boot_responses/example_silence_10sec.wav",
-        }[self.definition["stim_name"]]
 
     def gives_feedback(self, experiment, participant):
         return True
@@ -580,56 +753,288 @@ class TapTrialExplore(TapTrialAnalysisExplore):
         num_taps_detected = output_analysis["num_taps_detected"]
         score = output_analysis["score"]
 
+        self.var.set("score", score)
+        self.var.set("num_taps_detected", num_taps_detected)
+        self.var.set("target_rhythm", "".join(str(x) for x in output_analysis["target"]))
+        self.var.set("stim_name", output_analysis["stim_name"])
+
         if num_taps_detected == TARGET_NUM_TAPS:
-            return InfoPage(
-                Markup(
-                    f"""
-                    <h3>Feedback</h3>
-                    <hr>
-                    Your score is {score}.
-                    <hr>
-                    """
-                ),
-                time_estimate=2
-            )
-        elif num_taps_detected == (TARGET_NUM_TAPS - 1) or num_taps_detected == (TARGET_NUM_TAPS + 1):
+            if self.score_mode == "punishment":
+                return InfoPage(
+                    Markup(
+                        f"""
+                        <h3>Feedback</h3>
+                        <hr>
+                        Your penalty score is <b>{score}</b>.
+                        <hr>
+                        """
+                    ),
+                    time_estimate=2,
+                )
+            else:
+                return InfoPage(
+                    Markup(
+                        f"""
+                        <h3>Feedback</h3>
+                        <hr>
+                        Your score is <b>{score}</b>.
+                        <hr>
+                        """
+                    ),
+                    time_estimate=2,
+                )
+        else:
             return InfoPage(
                 Markup(
                     f"""
                     <h3>We did not detect the correct number of taps</h3>
                     <hr>
-                    We detected {num_taps_detected} taps in the rhythm, but we asked you to produce a rhythm with {TARGET_NUM_TAPS} taps.
-                    <br>
-                    <br>
-                    Please try to do one or more of the following:
-                    <ol><li>Make sure you are in a quiet environment.</li>
+                    We detected <b>{num_taps_detected}</b> taps, but you should produce <b>exactly 4 taps</b> during the green phase.
+                    <br><br>
+                    Please try again and remember:
+                    <ol>
+                        <li>Tap only during the green phase.</li>
+                        <li>Do not tap during the red phases.</li>
+                        <li>You may use either your left or right hand.</li>
                         <li>Tap on the surface of your laptop using your index finger.</li>
-                        <li>Do not tap during the beeps at the start and end of the recording.</li>
                     </ol>
-                    <b><b>If you don't improve your performance, the experiment will terminate.</b></b>
                     <hr>
                     """
                 ),
-                time_estimate=2
+                time_estimate=2,
+            )
+
+class RewardTapTrialExplore(TapTrialExplore):
+    score_mode = "reward"
+
+
+class PunishmentTapTrialExplore(TapTrialExplore):
+    score_mode = "punishment"
+
+
+class FamiliarisationTapTrial1(TapTrialAnalysisExplore):
+    score_mode = "reward"
+    time_estimate = DURATION_ESTIMATED_TRIAL
+    def show_trial(self, experiment, participant):
+        info = self.get_info()
+        duration_rec = info["stim_duration"]
+
+        return ModularPage(
+            f"trial_main_page_familiarisation_{self.id}",
+            AudioPrompt(
+                self.assets["stimulus_audio"].url,
+                Markup(
+                    """
+                    <br><h3>Familiarisation</h3>
+                    Your goal is simple: produce <b>exactly 4 taps</b> during the <b>green</b> phase.
+                    <br><br>
+                    Do not tap during the red phases.
+                    <br><br>
+                    You may use either your left or right hand.
+                    <br><br>
+                    <i>Practice attempt</i>
+                    """
+                ),
+            ),
+            AudioRecordControl(
+                duration=duration_rec,
+                show_meter=False,
+                controls=False,
+                auto_advance=False,
+                bot_response_media=self.get_bot_response_media(),
+            ),
+            time_estimate=duration_rec + 5,
+            progress_display=ProgressDisplay(
+                show_bar=True,
+                stages=[
+                    ProgressStage(
+                        3.5,
+                        "Wait in silence...",
+                        "red",
+                    ),
+                    ProgressStage(
+                        [3.5, (duration_rec - 6)],
+                        "START TAPPING!",
+                        "green",
+                    ),
+                    ProgressStage(
+                        3.5,
+                        "Stop tapping and wait in silence...",
+                        "red",
+                        persistent=False,
+                    ),
+                    ProgressStage(
+                        0.5,
+                        "Press Next when you are ready to continue...",
+                        "orange",
+                        persistent=True,
+                    ),
+                ],
+            ),
+        )
+
+    def gives_feedback(self, experiment, participant):
+        return True
+    
+    def show_feedback(self, experiment, participant):
+        output_analysis = self.analysis
+        num_taps_detected = output_analysis["num_taps_detected"]
+        self.var.set("num_taps_detected", num_taps_detected)
+
+        if num_taps_detected == TARGET_NUM_TAPS:
+            participant.var.set("familiarisation_first_success", True)
+            return InfoPage(
+                Markup(
+                    f"""
+                    <h3>Attempt</h3>
+                    <hr>
+                    We detected <b>{num_taps_detected}</b> taps.
+                    <br><br>
+                    Great, have another go to make sure you are comfortable with tapping.
+                    <br><br>
+                    Press <b>Next</b> when you are ready.
+                    <hr>
+                    """
+                ),
+                time_estimate=2,
             )
         else:
             return InfoPage(
                 Markup(
                     f"""
-                   <h3>Your performance is not good</h3>
+                    <h3>We did not detect the correct number of taps</h3>
                     <hr>
-                    <b><b>If you don't improve your performance, the experiment will terminate.</b></b>
+                    We detected <b>{num_taps_detected}</b> taps in the rhythm, but we asked you to produce a rhythm with <b>{TARGET_NUM_TAPS}</b> taps.
                     <br><br>
                     Please try to do one or more of the following:
-                    <ol><li>Make sure you are in a quiet environment.</li>
+                    <ol>
+                        <li>Make sure you are in a quiet environment.</li>
                         <li>Tap on the surface of your laptop using your index finger.</li>
                         <li>Do not tap during the beeps at the start and end of the recording.</li>
                     </ol>
+                    <b>If you don't improve your performance, the experiment will terminate.</b>
                     <hr>
                     """
                 ),
-                time_estimate=2
+                time_estimate=2,
             )
+
+class FamiliarisationTapTrial2(FamiliarisationTapTrial1):
+    time_estimate = DURATION_ESTIMATED_TRIAL
+    def show_feedback(self, experiment, participant):
+        output_analysis = self.analysis
+        num_taps_detected = output_analysis["num_taps_detected"]
+        self.var.set("num_taps_detected", num_taps_detected)
+
+        if num_taps_detected == TARGET_NUM_TAPS:
+            participant.var.set("familiarisation_second_success", True)
+            return InfoPage(
+                Markup(
+                    f"""
+                    <h3>Familiarisation complete</h3>
+                    <hr>
+                    We detected <b>{num_taps_detected}</b> taps.
+                    <br><br>
+                    Great. You have now completed the familiarisation phase successfully twice.
+                    <br><br>
+                    Press Next when you are ready to begin training.
+                    <hr>
+                    """
+                ),
+                time_estimate=2,
+            )
+        else:
+            return InfoPage(
+                Markup(
+                    f"""
+                    <h3>Oops, something went wrong.</h3>
+                    <hr>
+                    Please re-read the instructions and make sure you produce <b>exactly 4 taps</b> during the “green” phase.
+                    <br><br>
+                    We detected <b>{num_taps_detected}</b> taps.
+                    <br><br>
+                    The task consists of three phases:
+                    <ol>
+                        <li>In the first phase, a cue will be played back. You don't need to do anything while listening to it. Please remain silent.</li>
+                        <li>In the second (main) phase, <b>you tap</b>. Your goal is to produce <b>exactly 4 taps, neither more nor less</b>.</li>
+                        <li>In the last phase, you should stop tapping and remain silent.</li>
+                    </ol>
+                    <br><br>
+                    The three phases will be represented by a progress bar that will be red during phases 1 and 3 and green during phase 2.
+                    <br><br>
+                    Try to do one or more of the following:
+                    <ol>
+                        <li>Make sure you are in a quiet environment.</li>
+                        <li>Tap on the surface of your laptop using your index finger.</li>
+                        <li>Do not tap during the beeps at the start and end of the recording.</li>
+                    </ol>
+                    <br><br>
+                    <b>Unfortunately, if you do not improve your performance, the experiment will soon terminate.</b>
+                    <hr>
+                    """
+                ),
+                time_estimate=2,
+            )
+
+# TrainingTapTrial will inherit score persistence from TapTrialExplore.show_feedback
+
+class TrainingTapTrial(TapTrialExplore):
+    score_mode = "reward"
+    def show_trial(self, experiment, participant):
+        info = self.get_info()
+        duration_rec = info["stim_duration"]
+
+        training_trial_number = self.position + 1
+
+        return ModularPage(
+            f"trial_main_page_training_{self.id}",
+            AudioPrompt(
+                self.assets["stimulus_audio"].url,
+                Markup(
+                    f"""
+                    <br><h3>Training</h3>
+                    <b>Produce 4 taps. Explore different rhythms!</b>
+                    <br><br>
+                    <i>Training trial {training_trial_number} out of 5.</i>
+                    """
+                ),
+            ),
+            AudioRecordControl(
+                duration=duration_rec,
+                show_meter=False,
+                controls=False,
+                auto_advance=False,
+                bot_response_media=self.get_bot_response_media(),
+            ),
+            time_estimate=duration_rec + 5,
+            progress_display=ProgressDisplay(
+                show_bar=True,
+                stages=[
+                    ProgressStage(
+                        3.5,
+                        "Wait in silence...",
+                        "red",
+                    ),
+                    ProgressStage(
+                        [3.5, (duration_rec - 6)],
+                        "START TAPPING!",
+                        "green",
+                    ),
+                    ProgressStage(
+                        3.5,
+                        "Stop tapping and wait in silence...",
+                        "red",
+                        persistent=False,
+                    ),
+                    ProgressStage(
+                        0.5,
+                        "Press Next when you are ready to continue...",
+                        "orange",
+                        persistent=True,
+                    ),
+                ],
+            ),
+        )
 
 
 def welcome():
@@ -638,145 +1043,509 @@ def welcome():
             """
             <h3>Welcome</h3>
             <hr>
-            In this experiment, you will hear music and be asked to tap in time to the beat of the music by tapping with your finger.
+            In this experiment, you will have to tap on the surface of your laptop with your index finger.
             <br><br>
             We will monitor your responses throughout the experiment.
             <br><br>
-            Press <b><b>next</b></b> when you are ready to start.
+            Press <b>Next</b> when you are ready to start.
             <hr>
             """
         ),
-        time_estimate=3
+        time_estimate=3,
     )
 
+class FamiliarisationIntroPage(InfoPage):
+    def on_arrival(self, experiment, participant):
+        participant.var.set("familiarisation_first_success", False)
+        participant.var.set("familiarisation_second_success", False)
+        participant.var.set("explore_trial_counter", 0)
+        participant.var.set("explore_trial_numbers", {})
 
-# Tapping tasks
-ISO_tapping = join(
-    InfoPage(
-        Markup(
-            """
-            <h3>Tapping to Rhythms</h3>
-            <hr>
-            In each trial, you will hear a rhythm playing at a constant pace.
-            <br><br>
-            <b><b>Your goal is to tap in time with the beat of the rhythm.</b></b> <br><br>
-            Note:
-            <ul>
-                <li>Start tapping as soon as the rhythm starts and continue tapping until the rhythm ends.</li>
-                <li>At the beginning and end of each rhythm, you will hear three consecutive beeps.</li>
-                <li>Do not tap during these beeps, as they signal the beginning and end of each rhythm.</li>
-            </ul>
-            <br>
-            <hr>
-            """
-        ),
-        time_estimate=10,
+# Familiarisation task
+familiarisation_explore_tapping = FamiliarisationIntroPage(
+    Markup(
+        """
+        <h3>Practice how to tap on your laptop</h3>
+        <hr>
+        Please always tap on the surface of your laptop using your index finger. You can use either your right or left hand, whichever is more comfortable for you.
+        <br><br>
+        Do not tap on the keyboard or trackpad, and do not tap using your nails or any other object.
+        <br><br>
+        Your goal is to produce <b>exactly 4 taps</b> during the <b>green</b> phase.
+        <br><br>
+        Remember:
+        <ol>
+            <li>Tap on the surface of your laptop using your index finger.</li>
+            <li>Do not tap on any key or trackpad.</li>
+            <li>Do not tap with your fingernail or any object.</li>
+        </ol>
+        <br>
+        Press <b>Next</b> when you are ready to begin.
+        """
     ),
-    StaticTrialMaker(
-        id_="ISO_tapping",
-        trial_class=TapTrialISO,
-        nodes=nodes_iso,
-        expected_trials_per_participant=len(nodes_iso),
-        target_n_participants=NUM_PARTICIPANTS,
-        recruit_mode="n_participants",
-        check_performance_at_end=False,
-    ),
+    time_estimate=5,
 )
+### Attempt until they produce 4 taps (if not correct, then reread the instructions to make sure that they produce exactly 4 taps during the green phase)
+
+training_explore_tapping = InfoPage(
+    Markup(
+        """
+        <h3>Training</h3>
+        <hr>
+        Congratulations, you are now ready to try how the task works.
+        <br><br>
+        Your goal is to guess a hidden rhythmic pattern. You will have <b>5 attempts</b>. In each attempt, you must produce 4 taps, varying the time between taps (shorter or longer pauses).
+        <br><br>
+        After each attempt, you will see a score from 0 to 100. The score tells you how close your tapping was to the hidden pattern. Use the score to guide your learning.
+        <br><br>
+        This training uses a different hidden rhythm than the main experiment, so you will need to learn again from the beginning later.
+        <br><br>
+        Don’t worry if you cannot find the rhythm in 5 attempts. The goal here is just to understand how the task works.
+        <br><br>
+        Press <b>Next</b> when you are ready to start.
+        <hr>
+        """
+    ),
+    time_estimate=5,
+)
+
+familiarisation_trial_1 = StaticTrialMaker(
+    id_="familiarisation_trial_1",
+    trial_class=FamiliarisationTapTrial1,
+    nodes=nodes_familiarisation,
+    expected_trials_per_participant=1,
+    max_trials_per_participant=1,
+    allow_repeated_nodes=True,
+    n_repeat_trials=0,
+    target_n_participants=NUM_PARTICIPANTS,
+    recruit_mode="n_participants",
+    check_performance_at_end=False,
+)
+familiarisation_trial_1.time_estimate = DURATION_ESTIMATED_TRIAL + 2
+
+familiarisation_trial_2 = StaticTrialMaker(
+    id_="familiarisation_trial_2",
+    trial_class=FamiliarisationTapTrial2,
+    nodes=nodes_familiarisation_second,
+    expected_trials_per_participant=1,
+    max_trials_per_participant=1,
+    allow_repeated_nodes=True,
+    n_repeat_trials=0,
+    target_n_participants=NUM_PARTICIPANTS,
+    recruit_mode="n_participants",
+    check_performance_at_end=False,
+)
+familiarisation_trial_2.time_estimate = DURATION_ESTIMATED_TRIAL + 2
+
+familiarisation_loop_module_1 = Module(
+    "familiarisation_loop_module_1",
+    familiarisation_trial_1,
+)
+
+familiarisation_loop_module_2 = Module(
+    "familiarisation_loop_module_2",
+    familiarisation_trial_2,
+)
+
+training_trials = StaticTrialMaker(
+    id_="training_trials",
+    trial_class=TrainingTapTrial,
+    nodes=nodes_training,
+    expected_trials_per_participant=5,
+    max_trials_per_participant=5,
+    allow_repeated_nodes=True,
+    n_repeat_trials=0,
+    target_n_participants=NUM_PARTICIPANTS,
+    recruit_mode="n_participants",
+    check_performance_at_end=False,
+)
+training_trials.time_estimate = 5 * (DURATION_ESTIMATED_TRIAL + 2)
 
 instructions_explore_tapping = InfoPage(
     Markup(
-        """
-        <h3>NEW TASK</h3>
+        f"""
+        <h3>Main Task</h3>
         <hr>
-        EXPLAIN HERE INSTRUCTION OF NEW TASK: FIND THE HIDDEN RHYTHM BY TAPPING!
+        Congratulations, you are now ready for the main task.
+        <br><br>
+        Your goal is still to discover a hidden rhythmic pattern. In each attempt, you must produce 4 taps while varying their timing.
+        <br><br>
+        The main task has <b>4 sets of {NUM_TRIALS_PER_TARGET} attempts</b>, for a total of <b>{NUM_TRIALS_PER_TARGET * 4}</b> attempts.
+        <br><br>
+        {(
+            'The first two sets use the <b>reward</b> version of the task, where scores range from <b>0 to 100</b> and indicate how close you are to <b>rhythm solution 1</b>.<br>'
+            'The last two sets use the <b>punishment</b> version of the task, where scores range from <b>-100 to 0</b> and indicate how close you are to a new <b>rhythm solution 2</b>.'
+            if MAIN_TASK_ORDER == "reward_first"
+            else 'The first two sets use the <b>punishment</b> version of the task, where scores range from <b>-100 to 0</b> and indicate how close you are to <b>rhythm solution 1</b>.<br>'
+                'The last two sets use the <b>reward</b> version of the task, where scores range from <b>0 to 100</b> and indicate how close you are to a new <b>rhythm solution 2</b>.'
+        )}
+        <br><br>
+        There will be a short break after each set of <b>{NUM_TRIALS_PER_TARGET}</b> attempts.
+        <br><br>
+        Press <b>Next</b> when you are ready to start.
         <hr>
         """
     ),
     time_estimate=10,
 )
 
-explore_tapping_target1 = StaticTrialMaker(
-    id_="explore_tapping_target1",
-    trial_class=TapTrialExplore,
-    nodes=nodes_target1,
-    expected_trials_per_participant=NUM_TRIALS_PER_TARGET,
-    max_trials_per_participant=NUM_TRIALS_PER_TARGET,
-    allow_repeated_nodes=True,
-    n_repeat_trials=0,
-    target_n_participants=NUM_PARTICIPANTS,
-    recruit_mode="n_participants",
-    # check_performance_every_trial=True,
-    check_performance_at_end=False,
-    )
+break_after_reward_1 = InfoPage(
+    Markup(
+        f"""
+        <h3>Break</h3>
+        <hr>
+        You have completed the first set of {NUM_TRIALS_PER_TARGET} attempts in the reward task.
+        <br><br>
+        Please take a short break to rest if needed.
+        <br><br>
+        Press <b>Next</b> when you are ready to continue.
+        <hr>
+        """
+    ),
+    time_estimate=10,
+)
 
-explore_tapping_target2 = StaticTrialMaker(
-    id_="explore_tapping_target2",
-    trial_class=TapTrialExplore,
-    nodes=nodes_target2,
-    expected_trials_per_participant=NUM_TRIALS_PER_TARGET,
-    max_trials_per_participant=NUM_TRIALS_PER_TARGET,
-    allow_repeated_nodes=True,
-    n_repeat_trials=0,
-    target_n_participants=NUM_PARTICIPANTS,
-    recruit_mode="n_participants",
-    # check_performance_every_trial=True,
-    check_performance_at_end=False,
-    )
+break_after_reward_2 = InfoPage(
+    Markup(
+        f"""
+        <h3>Break</h3>
+        <hr>
+        You have completed the second set of {NUM_TRIALS_PER_TARGET} attempts in the reward task.
+        <br><br>
+        {('The next part will use the punishment version of the task.' if MAIN_TASK_ORDER == "reward_first" else 'You have now finished the reward part of the task.')}
+        <br><br>
+        Please take a short break to rest if needed.
+        <br><br>
+        Press <b>Next</b> when you are ready to continue.
+        <hr>
+        """
+    ),
+    time_estimate=10,
+)
 
-explore_tapping_target3 = StaticTrialMaker(
-    id_="explore_tapping_target3",
-    trial_class=TapTrialExplore,
-    nodes=nodes_target3,
+break_after_punishment_1 = InfoPage(
+    Markup(
+       f"""
+        <h3>Break</h3>
+        <hr>
+        You have completed the first set of {NUM_TRIALS_PER_TARGET} attempts in the punishment task.
+        <br><br>
+        Please take a short break to rest if needed.
+        <br><br>
+        Press <b>Next</b> when you are ready to continue.
+        <hr>
+        """
+    ),
+    time_estimate=10,
+)
+
+break_after_punishment_2 = InfoPage(
+    Markup(
+       f"""
+        <h3>Break</h3>
+        <hr>
+        You have completed the second set of {NUM_TRIALS_PER_TARGET} attempts in the punishment task.
+        <br><br>
+        {('The next part will use the reward version of the task.' if MAIN_TASK_ORDER == "punishment_first" else 'You have now finished the punishment part of the task.')}
+        <br><br>
+        Please take a short break to rest if needed.
+        <br><br>
+        Press <b>Next</b> when you are ready to continue.
+        <hr>
+        """
+    ),
+    time_estimate=10,
+)
+
+custom_end_page = InfoPage(
+    Markup(
+        """
+        <h3>That's the end of the experiment</h3>
+        <hr>
+        Thank you for taking part.
+        <br><br>
+        Please press <b>Next</b> to finish the study.
+        <hr>
+        """
+    ),
+    time_estimate=3,
+)
+
+reward_explore_tapping_target1 = StaticTrialMaker(
+    id_="reward_explore_tapping_target1",
+    trial_class=RewardTapTrialExplore,
+    nodes=reward_nodes_target1,
     expected_trials_per_participant=NUM_TRIALS_PER_TARGET,
     max_trials_per_participant=NUM_TRIALS_PER_TARGET,
     allow_repeated_nodes=True,
     n_repeat_trials=0,
     target_n_participants=NUM_PARTICIPANTS,
     recruit_mode="n_participants",
-    # check_performance_every_trial=True,
     check_performance_at_end=False,
-    )
+)
+reward_explore_tapping_target1.time_estimate = NUM_TRIALS_PER_TARGET * (DURATION_ESTIMATED_TRIAL + 2)
+
+reward_explore_tapping_target1a = StaticTrialMaker(
+    id_="reward_explore_tapping_target1a",
+    trial_class=RewardTapTrialExplore,
+    nodes=reward_nodes_target1a,
+    expected_trials_per_participant=NUM_TRIALS_PER_TARGET,
+    max_trials_per_participant=NUM_TRIALS_PER_TARGET,
+    allow_repeated_nodes=True,
+    n_repeat_trials=0,
+    target_n_participants=NUM_PARTICIPANTS,
+    recruit_mode="n_participants",
+    check_performance_at_end=False,
+)
+reward_explore_tapping_target1a.time_estimate = NUM_TRIALS_PER_TARGET * (DURATION_ESTIMATED_TRIAL + 2)
+
+reward_explore_tapping_target1b = StaticTrialMaker(
+    id_="reward_explore_tapping_target1b",
+    trial_class=RewardTapTrialExplore,
+    nodes=reward_nodes_target1b,
+    expected_trials_per_participant=NUM_TRIALS_PER_TARGET,
+    max_trials_per_participant=NUM_TRIALS_PER_TARGET,
+    allow_repeated_nodes=True,
+    n_repeat_trials=0,
+    target_n_participants=NUM_PARTICIPANTS,
+    recruit_mode="n_participants",
+    check_performance_at_end=False,
+)
+reward_explore_tapping_target1b.time_estimate = NUM_TRIALS_PER_TARGET * (DURATION_ESTIMATED_TRIAL + 2)
+
+reward_explore_tapping_target2 = StaticTrialMaker(
+    id_="reward_explore_tapping_target2",
+    trial_class=RewardTapTrialExplore,
+    nodes=reward_nodes_target2,
+    expected_trials_per_participant=NUM_TRIALS_PER_TARGET,
+    max_trials_per_participant=NUM_TRIALS_PER_TARGET,
+    allow_repeated_nodes=True,
+    n_repeat_trials=0,
+    target_n_participants=NUM_PARTICIPANTS,
+    recruit_mode="n_participants",
+    check_performance_at_end=False,
+)
+reward_explore_tapping_target2.time_estimate = NUM_TRIALS_PER_TARGET * (DURATION_ESTIMATED_TRIAL + 2)
+
+reward_explore_tapping_target2a = StaticTrialMaker(
+    id_="reward_explore_tapping_target2a",
+    trial_class=RewardTapTrialExplore,
+    nodes=reward_nodes_target2a,
+    expected_trials_per_participant=NUM_TRIALS_PER_TARGET,
+    max_trials_per_participant=NUM_TRIALS_PER_TARGET,
+    allow_repeated_nodes=True,
+    n_repeat_trials=0,
+    target_n_participants=NUM_PARTICIPANTS,
+    recruit_mode="n_participants",
+    check_performance_at_end=False,
+)
+reward_explore_tapping_target2a.time_estimate = NUM_TRIALS_PER_TARGET * (DURATION_ESTIMATED_TRIAL + 2)
+
+reward_explore_tapping_target2b = StaticTrialMaker(
+    id_="reward_explore_tapping_target2b",
+    trial_class=RewardTapTrialExplore,
+    nodes=reward_nodes_target2b,
+    expected_trials_per_participant=NUM_TRIALS_PER_TARGET,
+    max_trials_per_participant=NUM_TRIALS_PER_TARGET,
+    allow_repeated_nodes=True,
+    n_repeat_trials=0,
+    target_n_participants=NUM_PARTICIPANTS,
+    recruit_mode="n_participants",
+    check_performance_at_end=False,
+)
+reward_explore_tapping_target2b.time_estimate = NUM_TRIALS_PER_TARGET * (DURATION_ESTIMATED_TRIAL + 2)
+
+punishment_explore_tapping_target1 = StaticTrialMaker(
+    id_="punishment_explore_tapping_target1",
+    trial_class=PunishmentTapTrialExplore,
+    nodes=punishment_nodes_target1,
+    expected_trials_per_participant=NUM_TRIALS_PER_TARGET,
+    max_trials_per_participant=NUM_TRIALS_PER_TARGET,
+    allow_repeated_nodes=True,
+    n_repeat_trials=0,
+    target_n_participants=NUM_PARTICIPANTS,
+    recruit_mode="n_participants",
+    check_performance_at_end=False,
+)
+punishment_explore_tapping_target1.time_estimate = NUM_TRIALS_PER_TARGET * (DURATION_ESTIMATED_TRIAL + 2)
+
+punishment_explore_tapping_target1a = StaticTrialMaker(
+    id_="punishment_explore_tapping_target1a",
+    trial_class=PunishmentTapTrialExplore,
+    nodes=punishment_nodes_target1a,
+    expected_trials_per_participant=NUM_TRIALS_PER_TARGET,
+    max_trials_per_participant=NUM_TRIALS_PER_TARGET,
+    allow_repeated_nodes=True,
+    n_repeat_trials=0,
+    target_n_participants=NUM_PARTICIPANTS,
+    recruit_mode="n_participants",
+    check_performance_at_end=False,
+)
+punishment_explore_tapping_target1a.time_estimate = NUM_TRIALS_PER_TARGET * (DURATION_ESTIMATED_TRIAL + 2)
+
+punishment_explore_tapping_target1b = StaticTrialMaker(
+    id_="punishment_explore_tapping_target1b",
+    trial_class=PunishmentTapTrialExplore,
+    nodes=punishment_nodes_target1b,
+    expected_trials_per_participant=NUM_TRIALS_PER_TARGET,
+    max_trials_per_participant=NUM_TRIALS_PER_TARGET,
+    allow_repeated_nodes=True,
+    n_repeat_trials=0,
+    target_n_participants=NUM_PARTICIPANTS,
+    recruit_mode="n_participants",
+    check_performance_at_end=False,
+)
+punishment_explore_tapping_target1b.time_estimate = NUM_TRIALS_PER_TARGET * (DURATION_ESTIMATED_TRIAL + 2)
+
+punishment_explore_tapping_target2 = StaticTrialMaker(
+    id_="punishment_explore_tapping_target2",
+    trial_class=PunishmentTapTrialExplore,
+    nodes=punishment_nodes_target2,
+    expected_trials_per_participant=NUM_TRIALS_PER_TARGET,
+    max_trials_per_participant=NUM_TRIALS_PER_TARGET,
+    allow_repeated_nodes=True,
+    n_repeat_trials=0,
+    target_n_participants=NUM_PARTICIPANTS,
+    recruit_mode="n_participants",
+    check_performance_at_end=False,
+)
+punishment_explore_tapping_target2.time_estimate = NUM_TRIALS_PER_TARGET * (DURATION_ESTIMATED_TRIAL + 2)
+
+punishment_explore_tapping_target2a = StaticTrialMaker(
+    id_="punishment_explore_tapping_target2a",
+    trial_class=PunishmentTapTrialExplore,
+    nodes=punishment_nodes_target2a,
+    expected_trials_per_participant=NUM_TRIALS_PER_TARGET,
+    max_trials_per_participant=NUM_TRIALS_PER_TARGET,
+    allow_repeated_nodes=True,
+    n_repeat_trials=0,
+    target_n_participants=NUM_PARTICIPANTS,
+    recruit_mode="n_participants",
+    check_performance_at_end=False,
+)
+punishment_explore_tapping_target2a.time_estimate = NUM_TRIALS_PER_TARGET * (DURATION_ESTIMATED_TRIAL + 2)
+
+punishment_explore_tapping_target2b = StaticTrialMaker(
+    id_="punishment_explore_tapping_target2b",
+    trial_class=PunishmentTapTrialExplore,
+    nodes=punishment_nodes_target2b,
+    expected_trials_per_participant=NUM_TRIALS_PER_TARGET,
+    max_trials_per_participant=NUM_TRIALS_PER_TARGET,
+    allow_repeated_nodes=True,
+    n_repeat_trials=0,
+    target_n_participants=NUM_PARTICIPANTS,
+    recruit_mode="n_participants",
+    check_performance_at_end=False,
+)
+punishment_explore_tapping_target2b.time_estimate = NUM_TRIALS_PER_TARGET * (DURATION_ESTIMATED_TRIAL + 2)
 
 ########################################################################################################################
-# Timeline
 ########################################################################################################################
 class Exp(psynet.experiment.Experiment):
     label = "Tapping Experiment"
     asset_storage = LocalStorage()
 
     config = {
-        **get_prolific_settings(),
         "initial_recruitment_size": INITIAL_RECRUITMENT_SIZE,
-        "auto_recruit": AUTO_RECRUIT, 
+        "auto_recruit": AUTO_RECRUIT,
         "title": "Tapping experiment (Chrome browser, ~14 mins)",
         "description": "This is a tapping experiment. You will be asked to listen to rhythms and synchronize to the beat by tapping with your finger.",
         "contact_email_on_error": "m.angladatort@gold.ac.uk",
         "organization_name": "Max Planck Institute for Empirical Aesthetics",
-        "show_reward": False
     }
-
     if DEBUG:
         timeline = Timeline(
             NoConsent(),
             welcome(),
-            REPPVolumeCalibrationMusic(),  # calibrate volume with music
-            REPPMarkersTest(),  # pre-screening filtering participants based on recording test (markers)
-            REPPTappingCalibration(),  # calibrate tapping
-            ISO_tapping,
-            instructions_explore_tapping,
-            randomize(
-                label = "targets",
-                logic = [explore_tapping_target1, explore_tapping_target2, explore_tapping_target3]
+            REPPVolumeCalibrationMusic(),
+            REPPMarkersTest(),
+            familiarisation_explore_tapping,
+            while_loop(
+               "repeat_familiarisation_until_first_success",
+               lambda participant: not participant.var.get("familiarisation_first_success", False),
+               familiarisation_loop_module_1,
+               expected_repetitions=1,
+               fix_time_credit=False,
             ),
+            while_loop(
+               "repeat_familiarisation_until_second_success",
+               lambda participant: not participant.var.get("familiarisation_second_success", False),
+                familiarisation_loop_module_2,
+                expected_repetitions=1,
+                fix_time_credit=False,
+            ),
+            training_explore_tapping,
+            training_trials,
+            instructions_explore_tapping,
+            *(
+                [
+                    reward_explore_tapping_target1a,
+                    break_after_reward_1,
+                    reward_explore_tapping_target1b,
+                    break_after_reward_2,
+                    punishment_explore_tapping_target2a,
+                    break_after_punishment_1,
+                    punishment_explore_tapping_target2b,
+                ]
+                if MAIN_TASK_ORDER == "reward_first"
+                else [
+                    punishment_explore_tapping_target1a,
+                    break_after_punishment_1,
+                    punishment_explore_tapping_target1b,
+                    break_after_punishment_2,
+                    reward_explore_tapping_target2a,
+                    break_after_reward_1,
+                    reward_explore_tapping_target2b,
+                ]
+            ),
+            custom_end_page,
             SuccessfulEndPage(),
         )
     else:
         timeline = Timeline(
             NoConsent(),
             welcome(),
-            REPPVolumeCalibrationMusic(),  # calibrate volume with music
-            REPPMarkersTest(),  # pre-screening filtering participants based on recording test (markers)
-            REPPTappingCalibration(),  # calibrate tapping
-            ISO_tapping,
-            SuccessfulEndPage(),
+            REPPVolumeCalibrationMusic(),
+            REPPMarkersTest(),
+            familiarisation_explore_tapping,
+            while_loop(
+                "repeat_familiarisation_until_first_success",
+                lambda participant: not participant.var.get("familiarisation_first_success", False),
+                familiarisation_loop_module_1,
+                expected_repetitions=1,
+                fix_time_credit=False,
+            ),
+            while_loop(
+                "repeat_familiarisation_until_second_success",
+                lambda participant: not participant.var.get("familiarisation_second_success", False),
+                familiarisation_loop_module_2,
+                expected_repetitions=1,
+                fix_time_credit=False,
+            ),
+            training_explore_tapping,
+            training_trials,
+            instructions_explore_tapping,
+            *(
+                [
+                    reward_explore_tapping_target1a,
+                    break_after_reward_1,
+                    reward_explore_tapping_target1b,
+                    break_after_reward_2,
+                    punishment_explore_tapping_target2a,
+                    break_after_punishment_1,
+                    punishment_explore_tapping_target2b,
+                ]
+                if MAIN_TASK_ORDER == "reward_first"
+                else [
+                    punishment_explore_tapping_target1a,
+                    break_after_punishment_1,
+                    punishment_explore_tapping_target1b,
+                    break_after_punishment_2,
+                    reward_explore_tapping_target2a,
+                    break_after_reward_1,
+                    reward_explore_tapping_target2b,
+                ]
+            ),
+            custom_end_page,
+            SuccessfulEndPage()
         )
