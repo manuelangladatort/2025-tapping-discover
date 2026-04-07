@@ -44,8 +44,7 @@ class REPPMarkersTestRepeat(REPPMarkersTest):
 ########################################################################################################################
 # TODOS
 ########################################################################################################################
-# TODO: reduce beeps in marker from 3 to 1.
-# TODO: Add learning phase so participant understand the task.
+# TODO: Remove next button after tapping trial
 
 ########################################################################################################################
 # SETUP
@@ -517,10 +516,11 @@ class TapTrialISO(TapTrialAnalysisISO):
                 duration=duration_rec,
                 show_meter=False,
                 controls=False,
-                auto_advance=False,
+                auto_advance=True, # auto advance to next trial after tapping
                 bot_response_media=self.get_bot_response_media(),
             ),
             time_estimate=duration_rec + 5,
+            show_next_button=False, # hide next button during tapping trial
             progress_display=ProgressDisplay(
                 show_bar=True,
                 stages=[
@@ -542,7 +542,7 @@ class TapTrialISO(TapTrialAnalysisISO):
                     ),
                     ProgressStage(
                         0.5,
-                        "Press Next when you are ready to continue...",
+                        "Uploading audio...",
                         "orange",
                         persistent=True,
                     ),
@@ -674,10 +674,11 @@ class TapTrialExplore(TapTrialAnalysisExplore):
                 duration=duration_rec,
                 show_meter=False,
                 controls=False,
-                auto_advance=False,
+                auto_advance=True, # auto advance to next trial after tapping
                 bot_response_media=self.get_bot_response_media(),
             ),
             time_estimate=duration_rec + 5,
+            show_next_button=False, # hide next button during tapping trial
             progress_display=ProgressDisplay(
                 show_bar=True,
                 stages=[
@@ -699,7 +700,7 @@ class TapTrialExplore(TapTrialAnalysisExplore):
                     ),
                     ProgressStage(
                         0.5,
-                        "Press Next when you are ready to continue...",
+                        "Uploading audio...",
                         "orange",
                         persistent=True,
                     ),
@@ -804,10 +805,11 @@ class FamiliarisationTapTrial1(TapTrialAnalysisExplore):
                 duration=duration_rec,
                 show_meter=False,
                 controls=False,
-                auto_advance=False,
+                auto_advance=True, # auto advance to next trial after tapping
                 bot_response_media=self.get_bot_response_media(),
             ),
             time_estimate=duration_rec + 5,
+            show_next_button=False, # hide next button during tapping trial
             progress_display=ProgressDisplay(
                 show_bar=True,
                 stages=[
@@ -829,7 +831,7 @@ class FamiliarisationTapTrial1(TapTrialAnalysisExplore):
                     ),
                     ProgressStage(
                         0.5,
-                        "Press Next when you are ready to continue...",
+                        "Uploading audio...",
                         "orange",
                         persistent=True,
                     ),
@@ -967,10 +969,11 @@ class TrainingTapTrial(TapTrialExplore):
                 duration=duration_rec,
                 show_meter=False,
                 controls=False,
-                auto_advance=False,
+                auto_advance=True, # auto advance to next trial after tapping
                 bot_response_media=self.get_bot_response_media(),
             ),
             time_estimate=duration_rec + 5,
+            show_next_button=False, # hide next button during tapping trial
             progress_display=ProgressDisplay(
                 show_bar=True,
                 stages=[
@@ -992,7 +995,7 @@ class TrainingTapTrial(TapTrialExplore):
                     ),
                     ProgressStage(
                         0.5,
-                        "Press Next when you are ready to continue...",
+                        "Uploading audio...",
                         "orange",
                         persistent=True,
                     ),
@@ -1048,10 +1051,11 @@ class RegularTappingTrial(TapTrialAnalysisExplore):
                 duration=duration_rec,
                 show_meter=False,
                 controls=False,
-                auto_advance=False,
+                auto_advance=True, # auto advance to next trial after tapping
                 bot_response_media=self.get_bot_response_media(),
             ),
             time_estimate=duration_rec + 5,
+            show_next_button=False, # hide next button during tapping trial
             progress_display=ProgressDisplay(
                 show_bar=True,
                 stages=[
@@ -1073,7 +1077,7 @@ class RegularTappingTrial(TapTrialAnalysisExplore):
                     ),
                     ProgressStage(
                         0.5,
-                        "Press Next when you are ready to continue...",
+                        "Uploading audio...",
                         "orange",
                         persistent=True,
                     ),
@@ -1456,6 +1460,7 @@ class Exp(psynet.experiment.Experiment):
     config = {
         "initial_recruitment_size": INITIAL_RECRUITMENT_SIZE,
         "auto_recruit": AUTO_RECRUIT,
+        "show_reward": False, # disable reward display with bonus
         "title": "Tapping experiment (Chrome browser, ~14 mins)",
         "description": "This is a tapping experiment. You will be asked to listen to rhythms and synchronize to the beat by tapping with your finger.",
         "contact_email_on_error": "m.angladatort@gold.ac.uk",
