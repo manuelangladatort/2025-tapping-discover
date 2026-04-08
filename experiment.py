@@ -1165,8 +1165,8 @@ familiarisation_trial_1 = StaticTrialMaker(
     id_="familiarisation_trial_1",
     trial_class=FamiliarisationTapTrial1,
     nodes=nodes_familiarisation,
-    expected_trials_per_participant=5,
-    max_trials_per_participant=5,
+    expected_trials_per_participant=1,
+    max_trials_per_participant=1,
     allow_repeated_nodes=True,
     n_repeat_trials=0,
     target_n_participants=NUM_PARTICIPANTS,
@@ -1179,8 +1179,8 @@ familiarisation_trial_2 = StaticTrialMaker(
     id_="familiarisation_trial_2",
     trial_class=FamiliarisationTapTrial2,
     nodes=nodes_familiarisation_second,
-    expected_trials_per_participant=5,
-    max_trials_per_participant=5,
+    expected_trials_per_participant=1,
+    max_trials_per_participant=1,
     allow_repeated_nodes=True,
     n_repeat_trials=0,
     target_n_participants=NUM_PARTICIPANTS,
@@ -1625,10 +1625,10 @@ class Exp(psynet.experiment.Experiment):
     else:
         timeline = Timeline(
             NoConsent(),
-            # welcome(),
-            # REPPVolumeCalibrationMusic(),
-            # REPPMarkersTest(),
-            # familiarisation_explore_tapping,
+            welcome(),
+            REPPVolumeCalibrationMusic(),
+            REPPMarkersTest(),
+            familiarisation_explore_tapping,
             while_loop(
                "repeat_familiarisation_until_two_successes_or_five_attempts",
                lambda participant: (
