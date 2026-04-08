@@ -140,8 +140,6 @@ def reward_scoring_function(target, tapping_iois):
 
     return round(final_score)
 
-
-
 def punishment_scoring_function(target, tapping_iois):
     reward_score = reward_scoring_function(target, tapping_iois)
     punishment_score = reward_score - 100
@@ -843,22 +841,61 @@ class FamiliarisationTapTrial1(TapTrialAnalysisExplore):
 
     def gives_feedback(self, experiment, participant):
         return True
-    
+
     def show_feedback(self, experiment, participant):
         output_analysis = self.analysis
         num_taps_detected = output_analysis["num_taps_detected"]
         self.var.set("num_taps_detected", num_taps_detected)
 
-        participant.var.set(
-            "familiarisation_total_attempts",
-            participant.var.get("familiarisation_total_attempts", 0) + 1
-        )
+        trial_id = str(self.id)
+        run_id = participant.var.get("familiarisation_run_id", 0)
+
+        attempt_trial_ids = participant.var.get("familiarisation_attempt_trial_ids", [])
+        if trial_id not in attempt_trial_ids:
+            attempt_trial_ids = attempt_trial_ids + [trial_id]
+            participant.var.set("familiarisation_attempt_trial_ids", attempt_trial_ids)
+
+        total_attempts = len(attempt_trial_ids)
+        participant.var.set("familiarisation_total_attempts", total_attempts)
+
+        success_trial_ids = participant.var.get("familiarisation_successful_trial_ids", [])
 
         if num_taps_detected == TARGET_NUM_TAPS:
-            participant.var.set(
-                "familiarisation_success_count",
-                participant.var.get("familiarisation_success_count", 0) + 1
+            if trial_id not in success_trial_ids:
+                success_trial_ids = success_trial_ids + [trial_id]
+                participant.var.set("familiarisation_successful_trial_ids", success_trial_ids)
+
+            new_success_count = len(success_trial_ids)
+            participant.var.set("familiarisation_success_count", new_success_count)
+
+            print(
+                "DEBUG familiarisation:",
+                "run_id=", run_id,
+                "trial_id=", trial_id,
+                "success_ids=", success_trial_ids,
+                "attempt_ids=", attempt_trial_ids,
+                "new_success_count=", new_success_count,
+                "attempts=", total_attempts,
+                "participant_id=", participant.id,
             )
+
+            if new_success_count >= 2:
+                return InfoPage(
+                    Markup(
+                        f"""
+                        <h3>Familiarisation complete</h3>
+                        <hr>
+                        We detected <b>{num_taps_detected}</b> taps.
+                        <br><br>
+                        Great. You have now completed the familiarisation phase successfully twice.
+                        <br><br>
+                        Press <b>Next</b> when you are ready to begin training.
+                        <hr>
+                        """
+                    ),
+                    time_estimate=2,
+                )
+
             return InfoPage(
                 Markup(
                     f"""
@@ -874,91 +911,37 @@ class FamiliarisationTapTrial1(TapTrialAnalysisExplore):
                 ),
                 time_estimate=2,
             )
-        else:
-            return InfoPage(
-                Markup(
-                    f"""
-                    <h3>We did not detect the correct number of taps</h3>
-                    <hr>
-                    We detected <b>{num_taps_detected}</b> taps in the rhythm, but we asked you to produce a rhythm with <b>{TARGET_NUM_TAPS}</b> taps.
-                    <br><br>
-                    Please try to do one or more of the following:
-                    <ol>
-                        <li>Make sure you are in a quiet environment.</li>
-                        <li>Tap on the surface of your laptop using your index finger.</li>
-                        <li>Do not tap during the beeps at the start and end of the recording.</li>
-                    </ol>
-                    <b>If you don't improve your performance, the experiment will terminate.</b>
-                    <hr>
-                    """
-                ),
-                time_estimate=2,
-            )
 
-class FamiliarisationTapTrial2(FamiliarisationTapTrial1):
-    time_estimate = DURATION_ESTIMATED_TRIAL
-    def show_feedback(self, experiment, participant):
-        output_analysis = self.analysis
-        num_taps_detected = output_analysis["num_taps_detected"]
-        self.var.set("num_taps_detected", num_taps_detected)
-
-        participant.var.set(
-            "familiarisation_total_attempts",
-            participant.var.get("familiarisation_total_attempts", 0) + 1
+        print(
+            "DEBUG familiarisation:",
+            "run_id=", run_id,
+            "trial_id=", trial_id,
+            "success_ids=", success_trial_ids,
+            "attempt_ids=", attempt_trial_ids,
+            "new_success_count=", len(success_trial_ids),
+            "attempts=", total_attempts,
+            "participant_id=", participant.id,
         )
 
-        if num_taps_detected == TARGET_NUM_TAPS:
-            participant.var.set(
-                "familiarisation_success_count",
-                participant.var.get("familiarisation_success_count", 0) + 1
-            )
-            return InfoPage(
-                Markup(
-                    f"""
-                    <h3>Familiarisation complete</h3>
-                    <hr>
-                    We detected <b>{num_taps_detected}</b> taps.
-                    <br><br>
-                    Great. You have now completed the familiarisation phase successfully twice.
-                    <br><br>
-                    Press Next when you are ready to begin training.
-                    <hr>
-                    """
-                ),
-                time_estimate=2,
-            )
-        else:
-            return InfoPage(
-                Markup(
-                    f"""
-                    <h3>Oops, something went wrong.</h3>
-                    <hr>
-                    Please re-read the instructions and make sure you produce <b>exactly 4 taps</b> during the “green” phase.
-                    <br><br>
-                    We detected <b>{num_taps_detected}</b> taps.
-                    <br><br>
-                    The task consists of three phases:
-                    <ol>
-                        <li>In the first phase, a cue will be played back. You don't need to do anything while listening to it. Please remain silent.</li>
-                        <li>In the second (main) phase, <b>you tap</b>. Your goal is to produce <b>exactly 4 taps, neither more nor less</b>.</li>
-                        <li>In the last phase, you should stop tapping and remain silent.</li>
-                    </ol>
-                    <br><br>
-                    The three phases will be represented by a progress bar that will be red during phases 1 and 3 and green during phase 2.
-                    <br><br>
-                    Try to do one or more of the following:
-                    <ol>
-                        <li>Make sure you are in a quiet environment.</li>
-                        <li>Tap on the surface of your laptop using your index finger.</li>
-                        <li>Do not tap during the beeps at the start and end of the recording.</li>
-                    </ol>
-                    <br><br>
-                    <b>Unfortunately, if you do not improve your performance, the experiment will soon terminate.</b>
-                    <hr>
-                    """
-                ),
-                time_estimate=2,
-            )
+        return InfoPage(
+            Markup(
+                f"""
+                <h3>We did not detect the correct number of taps</h3>
+                <hr>
+                We detected <b>{num_taps_detected}</b> taps in the rhythm, but we asked you to produce a rhythm with <b>{TARGET_NUM_TAPS}</b> taps.
+                <br><br>
+                Please try to do one or more of the following:
+                <ol>
+                    <li>Make sure you are in a quiet environment.</li>
+                    <li>Tap on the surface of your laptop using your index finger.</li>
+                    <li>Do not tap during the beeps at the start and end of the recording.</li>
+                </ol>
+                <b>If you don't improve your performance, the experiment will terminate.</b>
+                <hr>
+                """
+            ),
+            time_estimate=2,
+        )
 
 # TrainingTapTrial will inherit score persistence from TapTrialExplore.show_feedback
 
@@ -1108,8 +1091,12 @@ class RegularTappingTrial(TapTrialAnalysisExplore):
 
 class FamiliarisationIntroPage(InfoPage):
     def on_arrival(self, experiment, participant):
+        previous_run_id = participant.var.get("familiarisation_run_id", 0)
+        participant.var.set("familiarisation_run_id", previous_run_id + 1)
         participant.var.set("familiarisation_success_count", 0)
         participant.var.set("familiarisation_total_attempts", 0)
+        participant.var.set("familiarisation_successful_trial_ids", [])
+        participant.var.set("familiarisation_attempt_trial_ids", [])
         participant.var.set("explore_trial_counter", 0)
         participant.var.set("explore_trial_numbers", {})
 
@@ -1164,7 +1151,18 @@ training_explore_tapping = InfoPage(
 familiarisation_trial_1 = StaticTrialMaker(
     id_="familiarisation_trial_1",
     trial_class=FamiliarisationTapTrial1,
-    nodes=nodes_familiarisation,
+    nodes=[
+        StaticNode(
+            definition={
+                "stim_name": "121",
+                "audio_filename": "music/silence_3sec.wav"
+            },
+            assets={
+                "stimulus_audio": CachedFunctionAsset(generate_music_stimulus_audio),
+                "stimulus_info": CachedFunctionAsset(generate_music_stimulus_info),
+            },
+        )
+    ],
     expected_trials_per_participant=1,
     max_trials_per_participant=1,
     allow_repeated_nodes=True,
@@ -1175,28 +1173,9 @@ familiarisation_trial_1 = StaticTrialMaker(
 )
 familiarisation_trial_1.time_estimate = DURATION_ESTIMATED_TRIAL + 2
 
-familiarisation_trial_2 = StaticTrialMaker(
-    id_="familiarisation_trial_2",
-    trial_class=FamiliarisationTapTrial2,
-    nodes=nodes_familiarisation_second,
-    expected_trials_per_participant=1,
-    max_trials_per_participant=1,
-    allow_repeated_nodes=True,
-    n_repeat_trials=0,
-    target_n_participants=NUM_PARTICIPANTS,
-    recruit_mode="n_participants",
-    check_performance_at_end=False,
-)
-familiarisation_trial_2.time_estimate = DURATION_ESTIMATED_TRIAL + 2
-
 familiarisation_loop_module_1 = Module(
     "familiarisation_loop_module_1",
     familiarisation_trial_1,
-)
-
-familiarisation_loop_module_2 = Module(
-    "familiarisation_loop_module_2",
-    familiarisation_trial_2,
 )
 
 training_trials = StaticTrialMaker(
