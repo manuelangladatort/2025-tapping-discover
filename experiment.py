@@ -850,12 +850,15 @@ class FamiliarisationTapTrial1(TapTrialAnalysisExplore):
         self.var.set("num_taps_detected", num_taps_detected)
 
         participant.var.set(
-            "familiarisation_first_attempts",
-            participant.var.get("familiarisation_first_attempts", 0) + 1
+            "familiarisation_total_attempts",
+            participant.var.get("familiarisation_total_attempts", 0) + 1
         )
 
         if num_taps_detected == TARGET_NUM_TAPS:
-            participant.var.set("familiarisation_first_success", True)
+            participant.var.set(
+                "familiarisation_success_count",
+                participant.var.get("familiarisation_success_count", 0) + 1
+            )
             return InfoPage(
                 Markup(
                     f"""
@@ -900,12 +903,15 @@ class FamiliarisationTapTrial2(FamiliarisationTapTrial1):
         self.var.set("num_taps_detected", num_taps_detected)
 
         participant.var.set(
-            "familiarisation_second_attempts",
-            participant.var.get("familiarisation_second_attempts", 0) + 1
+            "familiarisation_total_attempts",
+            participant.var.get("familiarisation_total_attempts", 0) + 1
         )
 
         if num_taps_detected == TARGET_NUM_TAPS:
-            participant.var.set("familiarisation_second_success", True)
+            participant.var.set(
+                "familiarisation_success_count",
+                participant.var.get("familiarisation_success_count", 0) + 1
+            )
             return InfoPage(
                 Markup(
                     f"""
@@ -1102,10 +1108,8 @@ class RegularTappingTrial(TapTrialAnalysisExplore):
 
 class FamiliarisationIntroPage(InfoPage):
     def on_arrival(self, experiment, participant):
-        participant.var.set("familiarisation_first_success", False)
-        participant.var.set("familiarisation_second_success", False)
-        participant.var.set("familiarisation_first_attempts", 0)
-        participant.var.set("familiarisation_second_attempts", 0)
+        participant.var.set("familiarisation_success_count", 0)
+        participant.var.set("familiarisation_total_attempts", 0)
         participant.var.set("explore_trial_counter", 0)
         participant.var.set("explore_trial_numbers", {})
 
@@ -1570,24 +1574,14 @@ class Exp(psynet.experiment.Experiment):
             REPPMarkersTest(),
             familiarisation_explore_tapping,
             while_loop(
-               "repeat_familiarisation_until_first_success",
+               "repeat_familiarisation_until_two_successes_or_five_attempts",
                lambda participant: (
-                   not participant.var.get("familiarisation_first_success", False)
-                   and participant.var.get("familiarisation_first_attempts", 0) < 5
+                   participant.var.get("familiarisation_success_count", 0) < 2
+                   and participant.var.get("familiarisation_total_attempts", 0) < 5
                                     ),
                familiarisation_loop_module_1,
                expected_repetitions=5,
                fix_time_credit=False,
-            ),
-            while_loop(
-               "repeat_familiarisation_until_second_success",
-               lambda participant: (
-                   not participant.var.get("familiarisation_second_success", False)
-                   and participant.var.get("familiarisation_second_attempts", 0) < 5
-                                 ),
-                familiarisation_loop_module_2,
-                expected_repetitions=5,
-                fix_time_credit=False,
             ),
             training_explore_tapping,
             training_trials,
@@ -1636,24 +1630,14 @@ class Exp(psynet.experiment.Experiment):
             # REPPMarkersTest(),
             # familiarisation_explore_tapping,
             while_loop(
-               "repeat_familiarisation_until_first_success",
+               "repeat_familiarisation_until_two_successes_or_five_attempts",
                lambda participant: (
-                   not participant.var.get("familiarisation_first_success", False)
-                   and participant.var.get("familiarisation_first_attempts", 0) < 5
+                   participant.var.get("familiarisation_success_count", 0) < 2
+                   and participant.var.get("familiarisation_total_attempts", 0) < 5
                                     ),
                familiarisation_loop_module_1,
                expected_repetitions=5,
                fix_time_credit=False,
-            ),
-            while_loop(
-               "repeat_familiarisation_until_second_success",
-               lambda participant: (
-                   not participant.var.get("familiarisation_second_success", False)
-                   and participant.var.get("familiarisation_second_attempts", 0) < 5
-                                 ),
-                familiarisation_loop_module_2,
-                expected_repetitions=5,
-                fix_time_credit=False,
             ),
             training_explore_tapping,
             training_trials,
