@@ -19,7 +19,7 @@ from repp.utils import save_json_to_file, save_samples_to_file
 import psynet.experiment
 from psynet.asset import CachedFunctionAsset, ExperimentAsset, LocalStorage
 from psynet.consent import NoConsent
-from psynet.modular_page import AudioPrompt, AudioRecordControl, ModularPage
+from psynet.modular_page import AudioPrompt, AudioRecordControl, ModularPage, SurveyJSControl
 from psynet.page import InfoPage, SuccessfulEndPage
 from psynet.timeline import Module, ProgressDisplay, ProgressStage, Timeline, join, randomize, while_loop
 from psynet.trial.audio import AudioRecordTrial
@@ -64,7 +64,7 @@ AUTO_RECRUIT = False # Keep recruiting until we have NUM_PARTICIPANTS participan
 NUM_TRIALS_PER_PARTICIPANT_ISO = 2 # practice trials
 
 # Per trial maker: 1 target × N trials (participant repeats the same trial N times)
-NUM_TRIALS_PER_TARGET = 25  # 25 repetitions of the same trial within each trial maker
+NUM_TRIALS_PER_TARGET = 1  # 25 repetitions of the same trial within each trial maker
     
 DURATION_ESTIMATED_TRIAL = 10 # estimated duration of each trial in seconds
 
@@ -109,11 +109,11 @@ def get_prolific_settings():
 ########################################################################################################################
 # Scoring function
 ########################################################################################################################
-def scale_to_target(target, vector):
+def to_simplex(vector):
     total = sum(vector)
     if total == 0:
-        return vector
-    return [v / total * sum(target) for v in vector]
+        return [0 for _ in vector]
+    return [v / total for v in vector]
 
 
 def reward_scoring_function(target, tapping_iois):
@@ -128,10 +128,12 @@ def reward_scoring_function(target, tapping_iois):
 
     # Use the first 3 IOIs if more were recorded
     tapping_iois = tapping_iois[:3]
+    target = target[:3]
 
-    iois_final = scale_to_target(target, tapping_iois)
-    error = norm([iois_final[i] - target[i] for i in range(3)])
-
+    target_simplex = to_simplex(target)
+    tapping_simplex = to_simplex(tapping_iois)
+    error = norm([tapping_simplex[i] - target_simplex[i] for i in range(3)])
+    
     score = math.exp(-error * perc) * 100
     final_score = a + (score - b) * D
     final_score = max(0, min(100, final_score))
@@ -847,6 +849,11 @@ class FamiliarisationTapTrial1(TapTrialAnalysisExplore):
         num_taps_detected = output_analysis["num_taps_detected"]
         self.var.set("num_taps_detected", num_taps_detected)
 
+        participant.var.set(
+            "familiarisation_first_attempts",
+            participant.var.get("familiarisation_first_attempts", 0) + 1
+        )
+
         if num_taps_detected == TARGET_NUM_TAPS:
             participant.var.set("familiarisation_first_success", True)
             return InfoPage(
@@ -891,6 +898,11 @@ class FamiliarisationTapTrial2(FamiliarisationTapTrial1):
         output_analysis = self.analysis
         num_taps_detected = output_analysis["num_taps_detected"]
         self.var.set("num_taps_detected", num_taps_detected)
+
+        participant.var.set(
+            "familiarisation_second_attempts",
+            participant.var.get("familiarisation_second_attempts", 0) + 1
+        )
 
         if num_taps_detected == TARGET_NUM_TAPS:
             participant.var.set("familiarisation_second_success", True)
@@ -1043,7 +1055,7 @@ class RegularTappingTrial(TapTrialAnalysisExplore):
                     <br><br>
                     Try to reproduce exactly the same regular tapping pattern on every attempt.
                     <br><br>
-                    <i>Attempt {regular_trial_number} out of 15.</i>
+                    <i>Attempt {regular_trial_number} out of 10.</i>
                     """
                 ),
             ),
@@ -1092,6 +1104,8 @@ class FamiliarisationIntroPage(InfoPage):
     def on_arrival(self, experiment, participant):
         participant.var.set("familiarisation_first_success", False)
         participant.var.set("familiarisation_second_success", False)
+        participant.var.set("familiarisation_first_attempts", 0)
+        participant.var.set("familiarisation_second_attempts", 0)
         participant.var.set("explore_trial_counter", 0)
         participant.var.set("explore_trial_numbers", {})
 
@@ -1199,15 +1213,15 @@ regular_tapping_trials = StaticTrialMaker(
     id_="regular_tapping_trials",
     trial_class=RegularTappingTrial,
     nodes=nodes_regular_tapping,
-    expected_trials_per_participant=15,
-    max_trials_per_participant=15,
+    expected_trials_per_participant=10,
+    max_trials_per_participant=10,
     allow_repeated_nodes=True,
     n_repeat_trials=0,
     target_n_participants=NUM_PARTICIPANTS,
     recruit_mode="n_participants",
     check_performance_at_end=False,
 )
-regular_tapping_trials.time_estimate = 15 * (DURATION_ESTIMATED_TRIAL + 2)
+regular_tapping_trials.time_estimate = 10 * (DURATION_ESTIMATED_TRIAL + 2)
 
 instructions_explore_tapping = InfoPage(
     Markup(
@@ -1236,6 +1250,88 @@ instructions_explore_tapping = InfoPage(
     ),
     time_estimate=10,
 )
+
+
+### Momentary subjective states page questionnaire
+def make_momentary_subjective_states_page(label_suffix):
+    return ModularPage(
+        f"momentary_subjective_states_{label_suffix}",
+        Markup(
+            """
+            <h3>How do you feel right now?</h3>
+            <hr>
+            Read each statement and then enter the appropriate number to the right of the statement to indicate how you feel right now, at this moment.
+            <br><br>
+            Numbers go from <b>1 (not at all)</b> to <b>5 (very much so)</b>.
+            <hr>
+            """
+        ),
+        SurveyJSControl(
+            {
+                "pages": [
+                    {
+                        "name": "momentary_subjective_states",
+                        "elements": [
+                            {
+                                "type": "text",
+                                "name": "energised",
+                                "title": "I feel energised right now:",
+                                "inputType": "number",
+                                "isRequired": True,
+                                "min": 1,
+                                "max": 5,
+                            },
+                            {
+                                "type": "text",
+                                "name": "heart_racing",
+                                "title": "My heart is racing:",
+                                "inputType": "number",
+                                "isRequired": True,
+                                "min": 1,
+                                "max": 5,
+                            },
+                            {
+                                "type": "text",
+                                "name": "concerned_about_performing_poorly",
+                                "title": "I'm concerned about performing poorly:",
+                                "inputType": "number",
+                                "isRequired": True,
+                                "min": 1,
+                                "max": 5,
+                            },
+                            {
+                                "type": "text",
+                                "name": "irritated",
+                                "title": "I feel irritated right now:",
+                                "inputType": "number",
+                                "isRequired": True,
+                                "min": 1,
+                                "max": 5,
+                            },
+                        ],
+                    }
+                ],
+                "completeText": "Next",
+                "showQuestionNumbers": "off",
+                "questionErrorLocation": "bottom",
+            },
+            bot_response=lambda: {
+                "energised": 3,
+                "heart_racing": 3,
+                "concerned_about_performing_poorly": 3,
+                "irritated": 3,
+            },
+        ),
+        time_estimate=12,
+    )
+
+
+momentary_subjective_states_1 = make_momentary_subjective_states_page("1")
+momentary_subjective_states_2 = make_momentary_subjective_states_page("2")
+momentary_subjective_states_3 = make_momentary_subjective_states_page("3")
+momentary_subjective_states_4 = make_momentary_subjective_states_page("4")
+momentary_subjective_states_5 = make_momentary_subjective_states_page("5")
+###
 
 regular_tapping_intro = InfoPage(
     Markup(
@@ -1475,16 +1571,22 @@ class Exp(psynet.experiment.Experiment):
             familiarisation_explore_tapping,
             while_loop(
                "repeat_familiarisation_until_first_success",
-               lambda participant: not participant.var.get("familiarisation_first_success", False),
+               lambda participant: (
+                   not participant.var.get("familiarisation_first_success", False)
+                   and participant.var.get("familiarisation_first_attempts", 0) < 5
+                                    ),
                familiarisation_loop_module_1,
-               expected_repetitions=1,
+               expected_repetitions=5,
                fix_time_credit=False,
             ),
             while_loop(
                "repeat_familiarisation_until_second_success",
-               lambda participant: not participant.var.get("familiarisation_second_success", False),
+               lambda participant: (
+                   not participant.var.get("familiarisation_second_success", False)
+                   and participant.var.get("familiarisation_second_attempts", 0) < 5
+                                 ),
                 familiarisation_loop_module_2,
-                expected_repetitions=1,
+                expected_repetitions=5,
                 fix_time_credit=False,
             ),
             training_explore_tapping,
@@ -1492,23 +1594,33 @@ class Exp(psynet.experiment.Experiment):
             instructions_explore_tapping,
             *(
                 [
+                    momentary_subjective_states_1,
                     reward_explore_tapping_target1a,
+                    momentary_subjective_states_2,
                     break_after_reward_1,
                     reward_explore_tapping_target1b,
+                    momentary_subjective_states_3,
                     break_after_reward_2,
                     punishment_explore_tapping_target2a,
+                    momentary_subjective_states_4,
                     break_after_punishment_1,
                     punishment_explore_tapping_target2b,
+                    momentary_subjective_states_5,
                 ]
                 if MAIN_TASK_ORDER == "reward_first"
                 else [
+                    momentary_subjective_states_1,
                     punishment_explore_tapping_target1a,
+                    momentary_subjective_states_2,
                     break_after_punishment_1,
                     punishment_explore_tapping_target1b,
+                    momentary_subjective_states_3,
                     break_after_punishment_2,
                     reward_explore_tapping_target2a,
+                    momentary_subjective_states_4,
                     break_after_reward_1,
                     reward_explore_tapping_target2b,
+                    momentary_subjective_states_5,
                 ]
             ),
             regular_tapping_intro,
@@ -1519,22 +1631,28 @@ class Exp(psynet.experiment.Experiment):
     else:
         timeline = Timeline(
             NoConsent(),
-            welcome(),
-            REPPVolumeCalibrationMusic(),
-            REPPMarkersTest(),
-            familiarisation_explore_tapping,
+            # welcome(),
+            # REPPVolumeCalibrationMusic(),
+            # REPPMarkersTest(),
+            # familiarisation_explore_tapping,
             while_loop(
-                "repeat_familiarisation_until_first_success",
-                lambda participant: not participant.var.get("familiarisation_first_success", False),
-                familiarisation_loop_module_1,
-                expected_repetitions=1,
-                fix_time_credit=False,
+               "repeat_familiarisation_until_first_success",
+               lambda participant: (
+                   not participant.var.get("familiarisation_first_success", False)
+                   and participant.var.get("familiarisation_first_attempts", 0) < 5
+                                    ),
+               familiarisation_loop_module_1,
+               expected_repetitions=5,
+               fix_time_credit=False,
             ),
             while_loop(
-                "repeat_familiarisation_until_second_success",
-                lambda participant: not participant.var.get("familiarisation_second_success", False),
+               "repeat_familiarisation_until_second_success",
+               lambda participant: (
+                   not participant.var.get("familiarisation_second_success", False)
+                   and participant.var.get("familiarisation_second_attempts", 0) < 5
+                                 ),
                 familiarisation_loop_module_2,
-                expected_repetitions=1,
+                expected_repetitions=5,
                 fix_time_credit=False,
             ),
             training_explore_tapping,
@@ -1542,23 +1660,33 @@ class Exp(psynet.experiment.Experiment):
             instructions_explore_tapping,
             *(
                 [
+                    momentary_subjective_states_1,
                     reward_explore_tapping_target1a,
+                    momentary_subjective_states_2,
                     break_after_reward_1,
                     reward_explore_tapping_target1b,
+                    momentary_subjective_states_3,
                     break_after_reward_2,
                     punishment_explore_tapping_target2a,
+                    momentary_subjective_states_4,
                     break_after_punishment_1,
                     punishment_explore_tapping_target2b,
+                    momentary_subjective_states_5,
                 ]
                 if MAIN_TASK_ORDER == "reward_first"
                 else [
+                    momentary_subjective_states_1,
                     punishment_explore_tapping_target1a,
+                    momentary_subjective_states_2,
                     break_after_punishment_1,
                     punishment_explore_tapping_target1b,
+                    momentary_subjective_states_3,
                     break_after_punishment_2,
                     reward_explore_tapping_target2a,
+                    momentary_subjective_states_4,
                     break_after_reward_1,
                     reward_explore_tapping_target2b,
+                    momentary_subjective_states_5,
                 ]
             ),
             regular_tapping_intro,
