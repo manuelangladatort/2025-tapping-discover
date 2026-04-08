@@ -64,7 +64,7 @@ AUTO_RECRUIT = False # Keep recruiting until we have NUM_PARTICIPANTS participan
 NUM_TRIALS_PER_PARTICIPANT_ISO = 2 # practice trials
 
 # Per trial maker: 1 target × N trials (participant repeats the same trial N times)
-NUM_TRIALS_PER_TARGET = 1  # 25 repetitions of the same trial within each trial maker
+NUM_TRIALS_PER_TARGET = 25  # 25 repetitions of the same trial within each trial maker
     
 DURATION_ESTIMATED_TRIAL = 10 # estimated duration of each trial in seconds
 
@@ -190,7 +190,7 @@ nodes_iso = [
         definition={
             "stim_name": name,
             "list_iois": iois,
-        },
+},
         assets={
             "stimulus_audio": CachedFunctionAsset(generate_iso_stimulus_audio),
             "stimulus_info": CachedFunctionAsset(generate_iso_stimulus_info),
@@ -1161,8 +1161,8 @@ familiarisation_trial_1 = StaticTrialMaker(
     id_="familiarisation_trial_1",
     trial_class=FamiliarisationTapTrial1,
     nodes=nodes_familiarisation,
-    expected_trials_per_participant=1,
-    max_trials_per_participant=1,
+    expected_trials_per_participant=5,
+    max_trials_per_participant=5,
     allow_repeated_nodes=True,
     n_repeat_trials=0,
     target_n_participants=NUM_PARTICIPANTS,
@@ -1175,8 +1175,8 @@ familiarisation_trial_2 = StaticTrialMaker(
     id_="familiarisation_trial_2",
     trial_class=FamiliarisationTapTrial2,
     nodes=nodes_familiarisation_second,
-    expected_trials_per_participant=1,
-    max_trials_per_participant=1,
+    expected_trials_per_participant=5,
+    max_trials_per_participant=5,
     allow_repeated_nodes=True,
     n_repeat_trials=0,
     target_n_participants=NUM_PARTICIPANTS,
