@@ -41,10 +41,6 @@ from .repp_prescreens import (
 class REPPMarkersTestRepeat(REPPMarkersTest):
     label = "repp_markers_test_repeat"
 
-########################################################################################################################
-# TODOS
-########################################################################################################################
-# TODO: Remove next button after tapping trial
 
 ########################################################################################################################
 # SETUP
@@ -106,21 +102,18 @@ def get_prolific_settings():
 
 
 ########################################################################################################################
-########################################################################################################################
 # Scoring function
 ########################################################################################################################
 def to_simplex(vector):
     total = sum(vector)
     if total == 0:
-        return [0 for _ in vector]
+        return vector
     return [v / total for v in vector]
 
 
 def reward_scoring_function(target, tapping_iois):
-    perc = 0.3
-    D = 1.55
-    a = 15
-    b = 45
+    sigma = 0.15
+    p = 1.5
 
     # Need at least 3 IOIs to compare against a 3-element target rhythm
     if len(tapping_iois) < 3 or len(target) < 3:
@@ -128,18 +121,50 @@ def reward_scoring_function(target, tapping_iois):
 
     # Use the first 3 IOIs if more were recorded
     tapping_iois = tapping_iois[:3]
-    target = target[:3]
 
+    produced_simplex = to_simplex(tapping_iois)
     target_simplex = to_simplex(target)
-    tapping_simplex = to_simplex(tapping_iois)
-    error = norm([tapping_simplex[i] - target_simplex[i] for i in range(3)])
-    
-    score = math.exp(-error * perc) * 100
-    final_score = a + (score - b) * D
+
+    error = norm(np.array(produced_simplex) - np.array(target_simplex))
+
+    final_score = 100 * math.exp(- (error / sigma) ** p)
     final_score = max(0, min(100, final_score))
 
     return round(final_score)
 
+
+# def old_scale_to_target(target, vector):
+#     total = sum(vector)
+#     if total == 0:
+#         return vector
+#     return [v / total * sum(target) for v in vector]
+
+
+# def old_reward_scoring_function(target, tapping_iois):
+#     perc = 0.3
+#     D = 1.55
+#     a = 15
+#     b = 45
+
+#     # Need at least 3 IOIs to compare against a 3-element target rhythm
+#     if len(tapping_iois) < 3 or len(target) < 3:
+#         return 0
+
+#     # Use the first 3 IOIs if more were recorded
+#     tapping_iois = tapping_iois[:3]
+
+#     iois_final = scale_to_target(target, tapping_iois)
+#     error = norm([iois_final[i] - target[i] for i in range(3)])
+
+#     score = math.exp(-error * perc) * 100
+#     final_score = a + (score - b) * D
+#     final_score = max(0, min(100, final_score))
+
+#     return round(final_score)
+
+
+
+>>>>>>> 61e16ef (Add new scoring function)
 def punishment_scoring_function(target, tapping_iois):
     reward_score = reward_scoring_function(target, tapping_iois)
     punishment_score = reward_score - 100
