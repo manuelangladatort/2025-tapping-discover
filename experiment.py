@@ -24,6 +24,7 @@ from psynet.page import InfoPage, SuccessfulEndPage
 from psynet.timeline import Module, ProgressDisplay, ProgressStage, Timeline, join, randomize, while_loop
 from psynet.trial.audio import AudioRecordTrial
 from psynet.trial.static import StaticNode, StaticTrial, StaticTrialMaker
+from sqlalchemy.sql import true
 
 
 # Import beat detection analysis functions from separate module
@@ -49,6 +50,11 @@ DEBUG = True
 MAIN_TASK_ORDER = "punishment_first"  # change: "reward_first" or "punishment_first"
 TARGET_NODE_1 = "323" # first target
 TARGET_NODE_2 = "332" # second target
+
+# Memory tapping (motor noise):
+MEMORY_RHYTHM_PROMPT_112 = "rhythm_112_final.wav"
+MEMORY_RHYTHM_PROMPT_121 = "rhythm_121_final.wav"
+N_REPEATS_MEMORY_TAPPING = 10
 
 # recruitment
 RECRUITER = "prolific" # prolific vs hotair vs generic
@@ -163,8 +169,6 @@ def reward_scoring_function(target, tapping_iois):
 #     return round(final_score)
 
 
-
->>>>>>> 61e16ef (Add new scoring function)
 def punishment_scoring_function(target, tapping_iois):
     reward_score = reward_scoring_function(target, tapping_iois)
     punishment_score = reward_score - 100
@@ -464,18 +468,41 @@ nodes_training = [
     )
 ]
 
-nodes_regular_tapping = [
-    StaticNode(
-        definition={
-            "stim_name": "111",
-            "audio_filename": "music/silence_3sec.wav"
-        },
-        assets={
-            "stimulus_audio": CachedFunctionAsset(generate_music_stimulus_audio),
-            "stimulus_info": CachedFunctionAsset(generate_music_stimulus_info),
-        },
-    )
-]
+def make_nodes_regular_tapping():
+    # PsyNet nodes cannot be shared across multiple trial makers/modules.
+    # Use a factory so each trial maker gets fresh node instances.
+    return [
+        StaticNode(
+            definition={
+                "stim_name": "111",
+                "audio_filename": "music/silence_3sec.wav",
+            },
+            assets={
+                "stimulus_audio": CachedFunctionAsset(generate_music_stimulus_audio),
+                "stimulus_info": CachedFunctionAsset(generate_music_stimulus_info),
+            },
+        )
+    ]
+
+
+def make_nodes_memory_tapping(stim_name: str):
+    # PsyNet nodes cannot be shared across multiple trial makers/modules.
+    # Use a factory so each trial maker gets fresh node instances.
+    return [
+        StaticNode(
+            definition={
+                "stim_name": stim_name,
+                "audio_filename": "music/silence_3sec.wav",
+            },
+            assets={
+                "stimulus_audio": CachedFunctionAsset(generate_music_stimulus_audio),
+                "stimulus_info": CachedFunctionAsset(generate_music_stimulus_info),
+            },
+        )
+    ]
+
+
+nodes_regular_tapping = make_nodes_regular_tapping()
 
 ########################################################################################################################
 # Experiment parts
@@ -1114,6 +1141,117 @@ class RegularTappingTrial(TapTrialAnalysisExplore):
     def gives_feedback(self, experiment, participant):
         return False
 
+
+class RhythmPromptTrial(StaticTrial):
+    time_estimate = 6
+
+    def show_trial(self, experiment, participant):
+        # Store the intended rhythm identifier in case you want it downstream.
+        participant.var.set("memory_rhythm_stim_name", self.definition["stim_name"])
+
+        stim_name = self.definition["stim_name"]
+        prompt_wav_by_stim_name = {
+            "112": MEMORY_RHYTHM_PROMPT_112,
+            "121": MEMORY_RHYTHM_PROMPT_121,
+        }
+        prompt_wav = prompt_wav_by_stim_name.get(stim_name)
+        if prompt_wav is None:
+            raise ValueError(
+                f"Unknown memory rhythm stim_name={stim_name!r}. "
+                f"Expected one of: {sorted(prompt_wav_by_stim_name.keys())}"
+            )
+
+        return ModularPage(
+            f"trial_rhythm_prompt_{self.id}",
+            AudioPrompt(
+                f"/static/{prompt_wav}",
+                Markup(
+                    """
+                    <br><h3>Listen to the rhythm</h3>
+                    <hr>
+                    On the next screens, you will be asked to <b><b>tap this rhythm from memory</b></b>.
+                    <br><br>
+                    Please listen carefully to the rhythm, you will only hear it once.
+                    <br><br>
+                    Press <b>Play again</b> to listen to the rhythm again.
+                    <hr>
+                    """
+                ),
+                controls={"Play": "Play again"},
+                loop=False,
+            ),
+            time_estimate=6,
+        )
+
+
+class MemoryTappingTrial(TapTrialAnalysisExplore):
+    score_mode = "reward"
+    time_estimate = DURATION_ESTIMATED_TRIAL
+
+    def show_trial(self, experiment, participant):
+        info = self.get_info()
+        duration_rec = info["stim_duration"]
+
+        memory_trial_number = self.position + 1
+        total_trials = N_REPEATS_MEMORY_TAPPING
+
+        return ModularPage(
+            f"trial_memory_tapping_{self.id}",
+            AudioPrompt(
+                # IMPORTANT: This should be silence+markers, not the rhythm itself.
+                self.assets["stimulus_audio"].url,
+                Markup(
+                    f"""
+                    <br><h3>Tap from memory</h3>
+                    <hr>
+                    During the green phase, produce <b><b>exactly 4 taps</b></b> that reproduce the rhythm you just heard from memory.
+                    <br><br>
+                    <i>Attempt {memory_trial_number} out of {total_trials}.</i>
+                    <hr>
+                    """
+                ),
+            ),
+            AudioRecordControl(
+                duration=duration_rec,
+                show_meter=False,
+                controls=False,
+                auto_advance=True, # auto advance to next trial after tapping
+                bot_response_media=self.get_bot_response_media(),
+            ),
+            time_estimate=duration_rec + 5,
+            show_next_button=False, # hide next button during tapping trial
+            progress_display=ProgressDisplay(
+                show_bar=True,
+                stages=[
+                    ProgressStage(
+                        3.5,
+                        "Wait in silence...",
+                        "red",
+                    ),
+                    ProgressStage(
+                        [3.5, (duration_rec - 6)],
+                        "START TAPPING!",
+                        "green",
+                    ),
+                    ProgressStage(
+                        3.5,
+                        "Stop tapping and wait in silence...",
+                        "red",
+                        persistent=False,
+                    ),
+                    ProgressStage(
+                        0.5,
+                        "Uploading audio...",
+                        "orange",
+                        persistent=True,
+                    ),
+                ],
+            ),
+        )
+
+    def gives_feedback(self, experiment, participant):
+        return False
+
 class FamiliarisationIntroPage(InfoPage):
     def on_arrival(self, experiment, participant):
         previous_run_id = participant.var.get("familiarisation_run_id", 0)
@@ -1230,6 +1368,60 @@ regular_tapping_trials = StaticTrialMaker(
     check_performance_at_end=False,
 )
 regular_tapping_trials.time_estimate = 10 * (DURATION_ESTIMATED_TRIAL + 2)
+
+def make_memory_tapping_intro(label_suffix: str):
+    return InfoPage(
+        Markup(
+            f"""
+            <br><h3>Memory tapping</h3>
+            <hr>
+            In the last part of the experiment, we want to measure your ability to tap from memory.
+            <br><br>
+            First, you will <b><b>listen to a rhythm</b></b>.<br>
+            Then, across multiple attempts, you will be asked to <b><b>tap that rhythm from memory</b></b>.
+            <br><br>
+            Please listen carefully to the rhythm, you will only hear it once.
+            <br><br>
+            You will take {N_REPEATS_MEMORY_TAPPING} attempts to tap the rhythm from memory. And we will repeat this process for two different rhythms.
+            <hr>
+            """
+        ),
+        time_estimate=6,
+    )
+
+def make_memory_tapping_block(stim_name: str):
+    rhythm_prompt_trials = StaticTrialMaker(
+        id_=f"rhythm_prompt_trials_{stim_name}",
+        trial_class=RhythmPromptTrial,
+        nodes=make_nodes_memory_tapping(stim_name),
+        expected_trials_per_participant=1,
+        max_trials_per_participant=1,
+        allow_repeated_nodes=True,
+        n_repeat_trials=0,
+        target_n_participants=NUM_PARTICIPANTS,
+        recruit_mode="n_participants",
+        check_performance_at_end=False,
+    )
+    rhythm_prompt_trials.time_estimate = 5
+
+    memory_tapping_trials = StaticTrialMaker(
+        id_=f"memory_tapping_trials_{stim_name}",
+        trial_class=MemoryTappingTrial,
+        nodes=make_nodes_memory_tapping(stim_name),
+        expected_trials_per_participant=N_REPEATS_MEMORY_TAPPING,
+        max_trials_per_participant=N_REPEATS_MEMORY_TAPPING,
+        allow_repeated_nodes=True,
+        n_repeat_trials=0,
+        target_n_participants=NUM_PARTICIPANTS,
+        recruit_mode="n_participants",
+        check_performance_at_end=False,
+    )
+    memory_tapping_trials.time_estimate = 10 * (DURATION_ESTIMATED_TRIAL + 2)
+
+    return join(
+        rhythm_prompt_trials,
+        memory_tapping_trials,
+    )
 
 instructions_explore_tapping = InfoPage(
     Markup(
@@ -1359,6 +1551,29 @@ regular_tapping_intro = InfoPage(
         """
     ),
     time_estimate=5,
+)
+
+memory_tapping_intro = InfoPage(
+    Markup(
+        """
+        <br><h3>Memory tapping</h3>
+        <hr>
+        In the last part of the experiment, we want to measure your ability to tap from memory.
+        <br><br>
+        First, you will <b><b>listen to a rhythm</b></b>.<br>
+        Then, across multiple attempts, you will be asked to <b><b>tap that rhythm from memory</b></b>.
+        <br><br>
+        Please pay attention:
+        <ol>
+            <li>Listen carefully to the rhythm, you will only hear it once.</li>
+            <li>Produce <b>exactly 4 taps</b>.</li>
+        </ol>
+        <br>
+        Press <b>Next</b> when you are ready to begin.
+        <hr>
+        """
+    ),
+    time_estimate=6,
 )
 
 break_after_reward_1 = InfoPage(
@@ -1570,115 +1785,65 @@ class Exp(psynet.experiment.Experiment):
         "contact_email_on_error": "m.angladatort@gold.ac.uk",
         "organization_name": "Max Planck Institute for Empirical Aesthetics",
     }
-    if DEBUG:
-        timeline = Timeline(
-            NoConsent(),
-            welcome(),
-            REPPVolumeCalibrationMusic(),
-            REPPMarkersTest(),
-            familiarisation_explore_tapping,
-            while_loop(
-               "repeat_familiarisation_until_two_successes_or_five_attempts",
-               lambda participant: (
-                   participant.var.get("familiarisation_success_count", 0) < 2
-                   and participant.var.get("familiarisation_total_attempts", 0) < 5
-                                    ),
-               familiarisation_loop_module_1,
-               expected_repetitions=5,
-               fix_time_credit=False,
-            ),
-            training_explore_tapping,
-            training_trials,
-            instructions_explore_tapping,
-            *(
-                [
-                    momentary_subjective_states_1,
-                    reward_explore_tapping_target1a,
-                    momentary_subjective_states_2,
-                    break_after_reward_1,
-                    reward_explore_tapping_target1b,
-                    momentary_subjective_states_3,
-                    break_after_reward_2,
-                    punishment_explore_tapping_target2a,
-                    momentary_subjective_states_4,
-                    break_after_punishment_1,
-                    punishment_explore_tapping_target2b,
-                    momentary_subjective_states_5,
-                ]
-                if MAIN_TASK_ORDER == "reward_first"
-                else [
-                    momentary_subjective_states_1,
-                    punishment_explore_tapping_target1a,
-                    momentary_subjective_states_2,
-                    break_after_punishment_1,
-                    punishment_explore_tapping_target1b,
-                    momentary_subjective_states_3,
-                    break_after_punishment_2,
-                    reward_explore_tapping_target2a,
-                    momentary_subjective_states_4,
-                    break_after_reward_1,
-                    reward_explore_tapping_target2b,
-                    momentary_subjective_states_5,
-                ]
-            ),
-            regular_tapping_intro,
-            regular_tapping_trials,
-            custom_end_page,
-            SuccessfulEndPage(),
-        )
-    else:
-        timeline = Timeline(
-            NoConsent(),
-            welcome(),
-            REPPVolumeCalibrationMusic(),
-            REPPMarkersTest(),
-            familiarisation_explore_tapping,
-            while_loop(
-               "repeat_familiarisation_until_two_successes_or_five_attempts",
-               lambda participant: (
-                   participant.var.get("familiarisation_success_count", 0) < 2
-                   and participant.var.get("familiarisation_total_attempts", 0) < 5
-                                    ),
-               familiarisation_loop_module_1,
-               expected_repetitions=5,
-               fix_time_credit=False,
-            ),
-            training_explore_tapping,
-            training_trials,
-            instructions_explore_tapping,
-            *(
-                [
-                    momentary_subjective_states_1,
-                    reward_explore_tapping_target1a,
-                    momentary_subjective_states_2,
-                    break_after_reward_1,
-                    reward_explore_tapping_target1b,
-                    momentary_subjective_states_3,
-                    break_after_reward_2,
-                    punishment_explore_tapping_target2a,
-                    momentary_subjective_states_4,
-                    break_after_punishment_1,
-                    punishment_explore_tapping_target2b,
-                    momentary_subjective_states_5,
-                ]
-                if MAIN_TASK_ORDER == "reward_first"
-                else [
-                    momentary_subjective_states_1,
-                    punishment_explore_tapping_target1a,
-                    momentary_subjective_states_2,
-                    break_after_punishment_1,
-                    punishment_explore_tapping_target1b,
-                    momentary_subjective_states_3,
-                    break_after_punishment_2,
-                    reward_explore_tapping_target2a,
-                    momentary_subjective_states_4,
-                    break_after_reward_1,
-                    reward_explore_tapping_target2b,
-                    momentary_subjective_states_5,
-                ]
-            ),
-            regular_tapping_intro,
-            regular_tapping_trials,
-            custom_end_page,
-            SuccessfulEndPage()
-        )
+
+    timeline = Timeline(
+        NoConsent(),
+        welcome(),
+        # REPPVolumeCalibrationMusic(),
+        # REPPMarkersTest(),
+        # familiarisation_explore_tapping,
+        # while_loop(
+        #     "repeat_familiarisation_until_two_successes_or_five_attempts",
+        #     lambda participant: (
+        #         participant.var.get("familiarisation_success_count", 0) < 2
+        #         and participant.var.get("familiarisation_total_attempts", 0) < 5
+        #                         ),
+        #     familiarisation_loop_module_1,
+        #     expected_repetitions=5,
+        #     fix_time_credit=False,
+        # ),
+        # training_explore_tapping,
+        # training_trials,
+        # instructions_explore_tapping,
+        # *(
+        #     [
+        #         momentary_subjective_states_1,
+        #         reward_explore_tapping_target1a,
+        #         momentary_subjective_states_2,
+        #         break_after_reward_1,
+        #         reward_explore_tapping_target1b,
+        #         momentary_subjective_states_3,
+        #         break_after_reward_2,
+        #         punishment_explore_tapping_target2a,
+        #         momentary_subjective_states_4,
+        #         break_after_punishment_1,
+        #         punishment_explore_tapping_target2b,
+        #         momentary_subjective_states_5,
+        #     ]
+        #     if MAIN_TASK_ORDER == "reward_first"
+        #     else [
+        #         momentary_subjective_states_1,
+        #         punishment_explore_tapping_target1a,
+        #         momentary_subjective_states_2,
+        #         break_after_punishment_1,
+        #         punishment_explore_tapping_target1b,
+        #         momentary_subjective_states_3,
+        #         break_after_punishment_2,
+        #         reward_explore_tapping_target2a,
+        #         momentary_subjective_states_4,
+        #         break_after_reward_1,
+        #         reward_explore_tapping_target2b,
+        #         momentary_subjective_states_5,
+        #     ]
+        # ),
+        make_memory_tapping_intro("memory_tapping"),
+        *randomize(
+            label="memory_tapping_blocks",
+            logic=[
+                make_memory_tapping_block("112"),
+                make_memory_tapping_block("121"),
+            ],
+        ),
+        # custom_end_page,
+        SuccessfulEndPage()
+    )
